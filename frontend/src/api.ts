@@ -1,4 +1,4 @@
-import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, Workspace, WSEvent } from './types'
+import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, Workspace, WSEvent } from './types'
 
 declare global {
   interface Window {
@@ -455,4 +455,38 @@ export async function searchConversations(query: string): Promise<SearchResult[]
   }
   const data = await res.json()
   return data.results || []
+}
+
+export async function fetchDiagnostics(): Promise<DiagnosticsInfo> {
+  const res = await fetch(`${getBaseURL()}/api/diagnostics`)
+  if (!res.ok) {
+    throw new Error('Falha ao obter diagnósticos')
+  }
+  return res.json()
+}
+
+export async function fetchOnboardingStatus(): Promise<boolean> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/onboarding/status`)
+    if (!res.ok) return true // fallback seguro para não travar o app
+    const data = await res.json()
+    return Boolean(data.done)
+  } catch {
+    return true
+  }
+}
+
+export async function markOnboardingDone(): Promise<boolean> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/onboarding/done`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    })
+    if (!res.ok) return false
+    const data = await res.json()
+    return Boolean(data.done)
+  } catch {
+    return false
+  }
 }

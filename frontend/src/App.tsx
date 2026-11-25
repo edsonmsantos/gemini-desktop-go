@@ -6,8 +6,10 @@ import { SettingsModal } from './components/SettingsModal'
 import { NewConversationModal } from './components/NewConversationModal'
 import { PermissionDialog } from './components/PermissionDialog'
 import { CommandCenterModal } from './components/CommandCenterModal'
+import { OnboardingModal } from './components/OnboardingModal'
 import {
   fetchAgentInfo,
+  fetchOnboardingStatus,
   fetchModels,
   fetchWorkspaces,
   fetchConversations,
@@ -77,6 +79,7 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
   const [settingsTab, setSettingsTab] = useState<'general' | 'mcp'>('general')
   const [isNewConvModalOpen, setIsNewConvModalOpen] = useState<boolean>(false)
   const [isCommandCenterOpen, setIsCommandCenterOpen] = useState<boolean>(false)
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false)
   const [serverPort, setServerPort] = useState<number>(8399)
   const [agentCmd, setAgentCmd] = useState<string>('')
 
@@ -150,6 +153,16 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
       } catch {
         // ignore
       }
+    }
+
+    // 6. Verificar status de Onboarding (primeira execução)
+    try {
+      const done = await fetchOnboardingStatus()
+      if (!done) {
+        setIsOnboardingOpen(true)
+      }
+    } catch {
+      // ignore
     }
   }, [])
 
@@ -773,6 +786,12 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
         onOpenSettings={handleOpenSettings}
         onSelectConversation={handleSelectConversation}
         theme={theme}
+      />
+
+      {/* Onboarding Wizard de Primeira Execução */}
+      <OnboardingModal
+        isOpen={isOnboardingOpen}
+        onClose={() => setIsOnboardingOpen(false)}
       />
     </div>
   )
