@@ -1,0 +1,151 @@
+:root {
+  --font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Dark theme (default) */
+  --bg-app: #131314;
+  --bg-sidebar: #1e1f20;
+  --bg-sidebar-hover: #282a2c;
+  --bg-sidebar-active: #37393b;
+  --bg-pill: #282a2c;
+  --bg-pill-hover: #37393b;
+  --bg-prompt: #1e1f20;
+  --bg-user-bubble: #282a2c;
+  --bg-card: #1e1f20;
+  --bg-code: #0d0d0e;
+  --bg-code-header: #171718;
+  --bg-modal: #1e1f20;
+  --bg-dropdown: #282a2c;
+
+  --border-subtle: #282a2c;
+  --border-card: #37393b;
+  --border-focus: #4285f4;
+
+  --text-primary: #e3e3e3;
+  --text-secondary: #c4c7c5;
+  --text-muted: #8e918f;
+  --text-disabled: #5e6260;
+
+  --accent-blue: #4285f4;
+  --accent-glow: radial-gradient(ellipse 90% 55% at 50% 100%, rgba(26, 68, 128, 0.42) 0%, rgba(13, 27, 42, 0.22) 55%, rgba(19, 19, 20, 0) 100%);
+
+  --status-pending: #8e918f;
+  --status-progress: #f9ab00;
+  --status-completed: #34a853;
+  --status-failed: #ea4335;
+
+  --shadow-dropdown: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-prompt: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] {
+  --bg-app: #ffffff;
+  --bg-sidebar: #f0f4f9;
+  --bg-sidebar-hover: #e1e8f0;
+  --bg-sidebar-active: #d2dce6;
+  --bg-pill: #dde3ea;
+  --bg-pill-hover: #d3dbe4;
+  --bg-prompt: #ffffff;
+  --bg-user-bubble: #f0f4f9;
+  --bg-card: #f8f9fa;
+  --bg-code: #f1f3f4;
+  --bg-code-header: #e8eaed;
+  --bg-modal: #ffffff;
+  --bg-dropdown: #ffffff;
+
+  --border-subtle: #e3e3e3;
+  --border-card: #dadce0;
+  --border-focus: #1a73e8;
+
+  --text-primary: #1f1f1f;
+  --text-secondary: #444746;
+  --text-muted: #727775;
+  --text-disabled: #a8aba9;
+
+  --accent-blue: #1a73e8;
+  --accent-glow: radial-gradient(ellipse 90% 55% at 50% 100%, rgba(194, 231, 255, 0.5) 0%, rgba(237, 242, 250, 0.3) 55%, rgba(255, 255, 255, 0) 100%);
+
+  --status-pending: #727775;
+  --status-progress: #b06000;
+  --status-completed: #188038;
+  --status-failed: #d93025;
+
+  --shadow-dropdown: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-prompt: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  outline: none;
+  color: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+textarea, input {
+  font-family: inherit;
+  color: inherit;
+  outline: none;
+  border: none;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-card);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+@keyframes pulseGlow {
+  0% { opacity: 0.6; transform: scale(0.98); }
+  50% { opacity: 1; transform: scale(1.02); }
+  100% { opacity: 0.6; transform: scale(0.98); }
+}
+
+.pulsing {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 0.85s linear infinite;
+}
