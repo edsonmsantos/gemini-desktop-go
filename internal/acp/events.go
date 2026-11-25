@@ -22,11 +22,13 @@ type ThoughtChunk struct {
 
 // ToolCall representa a invocação ou atualização de uma ferramenta
 type ToolCall struct {
-	ID       string                 `json:"id"`
-	Status   ToolCallStatus         `json:"status"`
-	Title    string                 `json:"title"`
-	Kind     string                 `json:"kind,omitempty"`
-	RawInput map[string]interface{} `json:"rawInput,omitempty"`
+	ID        string                 `json:"id"`
+	Status    ToolCallStatus         `json:"status"`
+	Title     string                 `json:"title"`
+	Kind      string                 `json:"kind,omitempty"`
+	Name      string                 `json:"name,omitempty"`
+	RawInput  map[string]interface{} `json:"rawInput,omitempty"`
+	RawOutput string                 `json:"rawOutput,omitempty"`
 }
 
 // PlanEntry representa uma etapa do plano de execução

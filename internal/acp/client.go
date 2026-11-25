@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,10 +11,12 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 func init() {
@@ -374,17 +377,22 @@ func (c *Client) handlePermissionRequest(msg IncomingMessage) {
 		SessionID string             `json:"sessionId"`
 		Options   []PermissionOption `json:"options"`
 		ToolCall  struct {
-			ID       string                 `json:"id"`
-			ToolID   string                 `json:"tool_call_id"`
-			Status   string                 `json:"status"`
-			Title    string                 `json:"title"`
-			Kind     string                 `json:"kind"`
-			RawInput map[string]interface{} `json:"rawInput"`
+			ToolCallID string                 `json:"toolCallId"`
+			ToolID     string                 `json:"tool_call_id"`
+			ID         string                 `json:"id"`
+			Name       string                 `json:"name"`
+			Status     string                 `json:"status"`
+			Title      string                 `json:"title"`
+			Kind       string                 `json:"kind"`
+			RawInput   map[string]interface{} `json:"rawInput"`
 		} `json:"toolCall"`
 	}
 	_ = json.Unmarshal(msg.Params, &params)
 
-	callID := params.ToolCall.ToolID
+	callID := params.ToolCall.ToolCallID
+	if callID == "" {
+		callID = params.ToolCall.ToolID
+	}
 	if callID == "" {
 		callID = params.ToolCall.ID
 	}
@@ -416,6 +424,7 @@ func (c *Client) handlePermissionRequest(msg IncomingMessage) {
 				Status:   tcStatus,
 				Title:    params.ToolCall.Title,
 				Kind:     params.ToolCall.Kind,
+				Name:     params.ToolCall.Name,
 				RawInput: params.ToolCall.RawInput,
 			},
 		},
@@ -468,6 +477,163 @@ func extractTextFromContent(raw json.RawMessage, fallbackText string) string {
 	return fallbackText
 }
 
+const maxToolOutputBytes = 16 * 1024
+
+func isBase64Char(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/'
+}
+
+func sanitizeBase64(s string) string {
+	var sb strings.Builder
+	n := len(s)
+	i := 0
+	for i < n {
+		if isBase64Char(s[i]) {
+			start := i
+			for i < n && isBase64Char(s[i]) {
+				i++
+			}
+			for i < n && s[i] == '=' {
+				i++
+			}
+			runLen := i - start
+			if runLen >= 2048 {
+				kb := runLen / 1024
+				if kb == 0 {
+					kb = 1
+				}
+				sb.WriteString(fmt.Sprintf("[dados binários omitidos: ~%d KB]", kb))
+			} else {
+				sb.WriteString(s[start:i])
+			}
+		} else {
+			sb.WriteByte(s[i])
+			i++
+		}
+	}
+	return sb.String()
+}
+
+// normalizeToolOutput normaliza e sanitiza a saída bruta e o conteúdo de ferramentas
+func normalizeToolOutput(rawOut json.RawMessage, content json.RawMessage) string {
+	var out string
+
+	trimmedRaw := bytes.TrimSpace(rawOut)
+	if len(trimmedRaw) > 0 && string(trimmedRaw) != "null" {
+		var s string
+		if err := json.Unmarshal(trimmedRaw, &s); err == nil {
+			if s != "" {
+				out = s
+			}
+		} else {
+			var val any
+			if err := json.Unmarshal(trimmedRaw, &val); err == nil && val != nil {
+				compactBytes, err := json.Marshal(val)
+				if err == nil {
+					out = string(compactBytes)
+				}
+			}
+		}
+	}
+
+	if out == "" {
+		trimmedContent := bytes.TrimSpace(content)
+		if len(trimmedContent) > 0 && string(trimmedContent) != "null" {
+			var parsed any
+			if err := json.Unmarshal(trimmedContent, &parsed); err == nil && parsed != nil {
+				out = extractContentGeneric(parsed)
+			}
+		}
+	}
+
+	if out == "" {
+		return ""
+	}
+
+	// Saneamento: trechos base64 longos
+	out = sanitizeBase64(out)
+
+	// Teto: maxToolOutputBytes com corte em fronteira de rune
+	if len(out) > maxToolOutputBytes {
+		totalBytes := len(out)
+		cutPoint := 0
+		for i, r := range out {
+			rLen := utf8.RuneLen(r)
+			if i+rLen > maxToolOutputBytes {
+				break
+			}
+			cutPoint = i + rLen
+		}
+		out = out[:cutPoint] + fmt.Sprintf("\n…[saída truncada: 16384 de %d bytes]", totalBytes)
+	}
+
+	return out
+}
+
+func extractContentGeneric(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case []any:
+		var sb strings.Builder
+		for _, item := range val {
+			sb.WriteString(extractContentGeneric(item))
+		}
+		return sb.String()
+	case map[string]any:
+		// Verifica nó de imagem
+		nodeType, _ := val["type"].(string)
+		mimeType, _ := val["mimeType"].(string)
+		if mimeType == "" {
+			mimeType, _ = val["mime_type"].(string)
+		}
+		_, hasData := val["data"]
+		if nodeType == "image" || (hasData && mimeType != "") {
+			if mimeType != "" {
+				return fmt.Sprintf("[imagem %s omitida]", mimeType)
+			}
+			return "[imagem omitida]"
+		}
+
+		// Verifica nó de texto direto
+		if nodeType == "text" {
+			if txt, ok := val["text"].(string); ok {
+				return txt
+			}
+		}
+
+		// Se contém campo "content", prioriza sua extração
+		if innerContent, ok := val["content"]; ok {
+			return extractContentGeneric(innerContent)
+		}
+
+		// Se contém campo "text", extrai
+		if txt, ok := val["text"].(string); ok {
+			return txt
+		}
+
+		// Caso contrário, percorre valores em ordem ordenada de chaves
+		keys := make([]string, 0, len(val))
+		for k := range val {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var sb strings.Builder
+		for _, k := range keys {
+			if k == "type" || k == "status" || k == "kind" || k == "name" {
+				continue
+			}
+			sb.WriteString(extractContentGeneric(val[k]))
+		}
+		return sb.String()
+	default:
+		return ""
+	}
+}
+
 // handleSessionUpdate mapeia atualizações de sessão do ACP para eventos da UI
 func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 	var payload struct {
@@ -479,13 +645,17 @@ func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 			Text          string          `json:"text"`
 
 			// Tool call fields
-			ToolCallID  string                 `json:"tool_call_id"`
-			ID          string                 `json:"id"`
-			Status      string                 `json:"status"`
-			Title       string                 `json:"title"`
-			Kind        string                 `json:"kind"`
-			RawInput    map[string]interface{} `json:"rawInput"`
-			RawInputAlt map[string]interface{} `json:"raw_input"`
+			ToolCallID    string                 `json:"toolCallId"`
+			ToolCallIDAlt string                 `json:"tool_call_id"`
+			ID            string                 `json:"id"`
+			Name          string                 `json:"name"`
+			Status        string                 `json:"status"`
+			Title         string                 `json:"title"`
+			Kind          string                 `json:"kind"`
+			RawInput      map[string]interface{} `json:"rawInput"`
+			RawInputAlt   map[string]interface{} `json:"raw_input"`
+			RawOutput     json.RawMessage        `json:"rawOutput"`
+			RawOutputAlt  json.RawMessage        `json:"raw_output"`
 
 			// Plan fields
 			Entries []PlanEntry `json:"entries"`
@@ -525,7 +695,13 @@ func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 	case "tool_call", "tool_call_update":
 		id := u.ToolCallID
 		if id == "" {
+			id = u.ToolCallIDAlt
+		}
+		if id == "" {
 			id = u.ID
+		}
+		if id == "" {
+			id = fmt.Sprintf("tc-%d", time.Now().UnixNano())
 		}
 		rawIn := u.RawInput
 		if rawIn == nil {
@@ -535,15 +711,22 @@ func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 		if status == "" {
 			status = ToolCallInProgress
 		}
+		rawOut := u.RawOutput
+		if len(rawOut) == 0 {
+			rawOut = u.RawOutputAlt
+		}
+		normalizedOut := normalizeToolOutput(rawOut, u.Content)
 		c.emitEvent(Event{
 			Type:      "tool_call",
 			SessionID: sessID,
 			ToolCall: &ToolCall{
-				ID:       id,
-				Status:   status,
-				Title:    u.Title,
-				Kind:     u.Kind,
-				RawInput: rawIn,
+				ID:        id,
+				Status:    status,
+				Title:     u.Title,
+				Kind:      u.Kind,
+				Name:      u.Name,
+				RawInput:  rawIn,
+				RawOutput: normalizedOut,
 			},
 		})
 
@@ -556,6 +739,9 @@ func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 
 	case "request_permission":
 		id := u.ToolCallID
+		if id == "" {
+			id = u.ToolCallIDAlt
+		}
 		if id == "" {
 			id = u.ID
 		}
@@ -580,6 +766,7 @@ func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 					Status:   ToolCallPending,
 					Title:    u.Title,
 					Kind:     u.Kind,
+					Name:     u.Name,
 					RawInput: u.RawInput,
 				},
 			},
@@ -1074,6 +1261,25 @@ func (c *Client) PromptSessionWithContent(ctx context.Context, sessionID string,
 	}
 	rawRes, err := framer.Call(ctx, "session/prompt", params)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			_ = framer.Notify("session/cancel", map[string]string{
+				"sessionId": sessionID,
+			})
+			var msg string
+			if errors.Is(err, context.DeadlineExceeded) {
+				msg = "tempo expirou: o agente passou do limite configurado para um turno; o turno foi cancelado"
+			} else {
+				msg = "turno cancelado"
+			}
+			ev := Event{
+				Type:      "error",
+				SessionID: sessionID,
+				Error:     &ErrorEvent{Msg: msg},
+			}
+			c.emitEvent(ev)
+			return fmt.Errorf("%s: %w", msg, err)
+		}
+
 		msg := err.Error()
 		if strings.Contains(msg, "conexão encerrada") || !c.IsAlive() {
 			msg = "agente encerrou inesperadamente"

@@ -41,9 +41,12 @@ O arquivo de configuração suporta o novo formato estruturado `agent`:
   },
   "defaultCwd": "/home/seu-usuario/projetos",
   "tempWorkspacesDir": "/tmp/geminidesktop",
-  "port": 8399
+  "port": 8399,
+  "turnTimeoutSec": 900
 }
 ```
+
+- `turnTimeoutSec`: timeout de turno em segundos (padrão 900, 0 = sem limite).
 
 Para usar o Gemini CLI oficial:
 ```json

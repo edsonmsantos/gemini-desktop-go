@@ -25,11 +25,28 @@ type Config struct {
 	Port              int         `json:"port"`
 	TempWorkspacesDir string      `json:"tempWorkspacesDir,omitempty"`
 	Notifications     *bool       `json:"notifications,omitempty"` // nil = habilitado (default)
+	TurnTimeoutSec    *int        `json:"turnTimeoutSec,omitempty"`
 }
 
 // NotificationsEnabled retorna se notificações nativas de fim de turno estão habilitadas
 func (c *Config) NotificationsEnabled() bool {
 	return c == nil || c.Notifications == nil || *c.Notifications
+}
+
+// TurnTimeout retorna o timeout configurado para um turno.
+// nil -> 900s (padrão); 0 -> 0 (sem limite); > 0 -> segundos; negativo -> 900s.
+func (c *Config) TurnTimeout() time.Duration {
+	if c == nil || c.TurnTimeoutSec == nil {
+		return 900 * time.Second
+	}
+	sec := *c.TurnTimeoutSec
+	if sec < 0 {
+		return 900 * time.Second
+	}
+	if sec == 0 {
+		return 0
+	}
+	return time.Duration(sec) * time.Second
 }
 
 // GetTempWorkspacesDir retorna o diretório base para workspaces temporários

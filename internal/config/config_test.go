@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConfig_LoadOrInit_DefaultDetected(t *testing.T) {
@@ -134,5 +135,58 @@ func TestConfig_TempWorkspacesDir(t *testing.T) {
 	}
 	if loaded.GetTempWorkspacesDir() != "/custom/temp/workspaces" {
 		t.Fatalf("esperava /custom/temp/workspaces, obteve %s", loaded.GetTempWorkspacesDir())
+	}
+}
+
+func TestConfig_TurnTimeout(t *testing.T) {
+	// 1. cfg == nil
+	var nilCfg *Config
+	if d := nilCfg.TurnTimeout(); d != 900*time.Second {
+		t.Fatalf("esperava 900s para nil cfg, obteve %v", d)
+	}
+
+	// 2. TurnTimeoutSec ausente (nil)
+	cfg := &Config{}
+	if d := cfg.TurnTimeout(); d != 900*time.Second {
+		t.Fatalf("esperava 900s para TurnTimeoutSec nil, obteve %v", d)
+	}
+
+	// 3. TurnTimeoutSec == 0 (sem limite)
+	zero := 0
+	cfg.TurnTimeoutSec = &zero
+	if d := cfg.TurnTimeout(); d != 0 {
+		t.Fatalf("esperava 0 para TurnTimeoutSec = 0, obteve %v", d)
+	}
+
+	// 4. TurnTimeoutSec > 0 (ex.: 300s)
+	pos := 300
+	cfg.TurnTimeoutSec = &pos
+	if d := cfg.TurnTimeout(); d != 300*time.Second {
+		t.Fatalf("esperava 300s para TurnTimeoutSec = 300, obteve %v", d)
+	}
+
+	// 5. TurnTimeoutSec negativo (ex.: -5 -> fallback 900s)
+	neg := -5
+	cfg.TurnTimeoutSec = &neg
+	if d := cfg.TurnTimeout(); d != 900*time.Second {
+		t.Fatalf("esperava 900s para TurnTimeoutSec = -5, obteve %v", d)
+	}
+
+	// 6. Carregamento via JSON
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	jsonStr := `{"port": 8399, "turnTimeoutSec": 450}`
+	if err := os.WriteFile(cfgPath, []byte(jsonStr), 0644); err != nil {
+		t.Fatalf("falha ao gravar config teste: %v", err)
+	}
+	loaded, err := LoadOrInit(cfgPath)
+	if err != nil {
+		t.Fatalf("falha ao carregar config: %v", err)
+	}
+	if loaded.TurnTimeoutSec == nil || *loaded.TurnTimeoutSec != 450 {
+		t.Fatalf("esperava TurnTimeoutSec 450, obteve %v", loaded.TurnTimeoutSec)
+	}
+	if d := loaded.TurnTimeout(); d != 450*time.Second {
+		t.Fatalf("esperava 450s de timeout, obteve %v", d)
 	}
 }
