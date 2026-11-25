@@ -73,7 +73,7 @@ func existsFile(p string) bool {
 }
 
 // renderMarkdownPDF gera o PDF da resposta em dest; retorna erro se falhar.
-func renderMarkdownPDF(dest, title, markdown string) error {
+func RenderMarkdownPDF(dest, title, markdown string) error {
 	fontDir := pdfFontDirReady()
 	pdf := fpdf.New("P", "mm", "A4", fontDir)
 	pdf.SetMargins(pdfMargin, 16, pdfMargin)
@@ -274,12 +274,12 @@ func (s *Server) handleExportPDF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := sanitizeFilename(title)
+	base := SanitizeFilename(title)
 	if base == "" {
 		base = "resposta"
 	}
 	dest := filepath.Join(dir, fmt.Sprintf("%s-%s.pdf", base, time.Now().Format("20060102-150405")))
-	if err := renderMarkdownPDF(dest, title, req.Markdown); err != nil {
+	if err := RenderMarkdownPDF(dest, title, req.Markdown); err != nil {
 		http.Error(w, "falha ao gerar PDF: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

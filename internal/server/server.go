@@ -1344,7 +1344,7 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := sanitizeFilename(req.Filename)
+	name := SanitizeFilename(req.Filename)
 	if name == "" {
 		// Nome padrão para anexos sem nome; extensão pelo CONTEÚDO real
 		// (detectImageMime tem fallback octet-stream, nunca vazio)
@@ -1462,7 +1462,7 @@ func (s *Server) writeClipboardMiss(w http.ResponseWriter) {
 }
 
 // sanitizeFilename limpa um nome de arquivo enviado pelo cliente
-func sanitizeFilename(name string) string {
+func SanitizeFilename(name string) string {
 	name = filepath.Base(strings.TrimSpace(name))
 	var b strings.Builder
 	for _, r := range name {

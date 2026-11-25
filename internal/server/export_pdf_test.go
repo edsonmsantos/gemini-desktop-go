@@ -14,7 +14,7 @@ import (
 func TestRenderMarkdownPDF_GeraArquivoValido(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "resp.pdf")
 	md := "# Título com acentuação\n\nParágrafo com **negrito**, `código` e [link](https://exemplo.com).\n\n- item um\n- item dois\n\n```go\nfmt.Println(\"olá\")\n```\n\n> citação\n\n---\n\n1. primeiro\n2. segundo"
-	if err := renderMarkdownPDF(dest, "Teste de Exportação", md); err != nil {
+	if err := RenderMarkdownPDF(dest, "Teste de Exportação", md); err != nil {
 		t.Fatalf("falha ao gerar PDF: %v", err)
 	}
 	data, err := os.ReadFile(dest)

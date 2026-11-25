@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -102,6 +103,42 @@ func (a *App) SelectFiles() []string {
 		return []string{}
 	}
 	return res
+}
+
+// SavePdfDialog abre o diálogo nativo para o usuário escolher onde salvar,
+// gera o PDF no destino escolhido e devolve o caminho ("" se cancelado).
+func (a *App) SavePdfDialog(title, markdown string) string {
+	if strings.TrimSpace(markdown) == "" || a.ctx == nil {
+		return ""
+	}
+	defName := server.SanitizeFilename(title)
+	if defName == "" {
+		defName = "resposta"
+	}
+	defName = fmt.Sprintf("%s-%s.pdf", defName, time.Now().Format("20060102-150405"))
+
+	path, err := wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
+		Title:           "Salvar resposta como PDF",
+		DefaultFilename: defName,
+		Filters: []wailsRuntime.FileFilter{
+			{DisplayName: "PDF (*.pdf)", Pattern: "*.pdf"},
+		},
+	})
+	if err != nil {
+		log.Printf("[Wails] falha no diálogo de salvar: %v", err)
+		return ""
+	}
+	if path == "" {
+		return "" // usuário cancelou
+	}
+	if !strings.HasSuffix(strings.ToLower(path), ".pdf") {
+		path += ".pdf"
+	}
+	if err := server.RenderMarkdownPDF(path, title, markdown); err != nil {
+		log.Printf("[Wails] falha ao gerar PDF em %s: %v", path, err)
+		return ""
+	}
+	return path
 }
 
 // startup é chamado quando a janela desktop do Wails é inicializada

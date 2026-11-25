@@ -123,6 +123,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     if (savingPdf) return
     setSavingPdf(true)
     try {
+      // Modo desktop: diálogo nativo para o usuário escolher onde salvar
+      const saveViaDialog = window.go?.main?.App?.SavePdfDialog
+      if (saveViaDialog) {
+        const chosen = await saveViaDialog(conversationTitle || 'Resposta do Gemini', message.content)
+        if (chosen) {
+          setSavedPath(chosen)
+          setTimeout(() => setSavedPath(null), 8000)
+        }
+        return // cancelado pelo usuário: sem feedback
+      }
+      // Modo web (serve): salva direto em ~/Downloads/Gemini Desktop
       const res = await exportResponsePdf(conversationTitle || 'Resposta do Gemini', message.content)
       if (res) {
         setSavedPath(res.displayPath)
@@ -438,7 +449,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <ActionButton
                 onClick={handleSavePdf}
                 label={savingPdf ? '⏳ Gerando…' : savedPath ? '✓ Salvo' : '📄 Salvar PDF'}
-                title="Salvar esta resposta como PDF em ~/Downloads/Gemini Desktop"
+                title="Salvar esta resposta como PDF"
                 disabled={savingPdf}
               />
               {sources.length > 0 && (

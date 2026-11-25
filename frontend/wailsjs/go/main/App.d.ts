@@ -6,6 +6,8 @@ export function GetConfig():Promise<main.AppConfigResponse>;
 
 export function GetServerURL():Promise<string>;
 
+export function SavePdfDialog(arg1:string,arg2:string):Promise<string>;
+
 export function SelectDirectory():Promise<string>;
 
 export function SelectFiles():Promise<Array<string>>;

@@ -14,6 +14,7 @@ declare global {
           GetConfig?: () => Promise<{ port: number; baseUrl: string; agent: string }>
           SelectDirectory?: () => Promise<string>
           SelectFiles?: () => Promise<string[]>
+          SavePdfDialog?: (title: string, markdown: string) => Promise<string>
         }
       }
     }
