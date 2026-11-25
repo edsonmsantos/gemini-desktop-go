@@ -6,6 +6,36 @@ import { ToolCallCard } from './ToolCallCard'
 import { PermissionCard } from './PermissionCard'
 import { PlanCard } from './PlanCard'
 import { Message, PermissionRequest, Plan, ToolCall } from '../types'
+import { exportResponsePdf, openExternalURL } from '../api'
+
+interface SourceLink {
+  text: string
+  url: string
+}
+
+// extractSources coleta links da resposta: markdown [texto](url) e URLs soltas
+function extractSources(content: string): SourceLink[] {
+  const seen = new Set<string>()
+  const out: SourceLink[] = []
+  const add = (text: string, url: string) => {
+    const clean = url.replace(/[.,;:]+$/, '')
+    if (!/^https?:\/\//.test(clean) || seen.has(clean) || out.length >= 20) return
+    seen.add(clean)
+    const label = text.trim() || clean.replace(/^https?:\/\//, '').split('/')[0]
+    out.push({ text: label, url: clean })
+  }
+  const mdLink = /\[([^\]]{1,150})\]\((https?:\/\/[^)\s]+)[^)]*\)/g
+  let m: RegExpExecArray | null
+  while ((m = mdLink.exec(content)) !== null) {
+    add(m[1], m[2])
+  }
+  const rest = content.replace(/\[([^\]]{1,150})\]\((https?:\/\/[^)\s]+)[^)]*\)/g, ' ')
+  const bare = /https?:\/\/[^\s<>"')\]]+/g
+  while ((m = bare.exec(rest)) !== null) {
+    add('', m[0])
+  }
+  return out
+}
 
 interface MessageBubbleProps {
   message: Message
@@ -14,6 +44,7 @@ interface MessageBubbleProps {
   onEdit?: (newText: string) => void
   showRegenerate?: boolean
   showEdit?: boolean
+  conversationTitle?: string
 }
 
 // friendlyError traduz mensagens técnicas do backend para linguagem comum
@@ -58,11 +89,53 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onRegenerate,
   onEdit,
   showRegenerate,
-  showEdit
+  showEdit,
+  conversationTitle
 }) => {
   const isUser = message.role === 'user'
   const [editing, setEditing] = useState<boolean>(false)
   const [editText, setEditText] = useState<string>(message.content)
+  const [copied, setCopied] = useState<boolean>(false)
+  const [savingPdf, setSavingPdf] = useState<boolean>(false)
+  const [savedPath, setSavedPath] = useState<string | null>(null)
+  const [showSources, setShowSources] = useState<boolean>(false)
+
+  const isAssistant = message.role === 'assistant'
+  const sources = isAssistant ? extractSources(message.content) : []
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content)
+    } catch {
+      // Fallback para webviews sem permissão de clipboard async
+      const ta = document.createElement('textarea')
+      ta.value = message.content
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      ta.remove()
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleSavePdf = async () => {
+    if (savingPdf) return
+    setSavingPdf(true)
+    try {
+      const res = await exportResponsePdf(conversationTitle || 'Resposta do Gemini', message.content)
+      if (res) {
+        setSavedPath(res.displayPath)
+        setTimeout(() => setSavedPath(null), 8000)
+      }
+    } finally {
+      setSavingPdf(false)
+    }
+  }
+
+  const handleOpenSource = (url: string) => {
+    void openExternalURL(url)
+  }
 
   // Tratar mensagens com meta JSON
   let toolCallData: ToolCall | null = null
@@ -289,6 +362,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   return (
     <div
+      className="msg-row"
       style={{
         display: 'flex',
         alignItems: 'flex-start',
@@ -353,28 +427,110 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <MarkdownRenderer content={message.content} />
         )}
 
-        {/* Ação Regenerar (última resposta do assistente) */}
-        {showRegenerate && onRegenerate && !isErr && (
-          <button
-            type="button"
-            onClick={onRegenerate}
-            title="Descartar esta resposta e gerar outra"
-            className="msg-action-btn"
-            style={{
-              marginTop: 8,
-              padding: '4px 10px',
-              borderRadius: 12,
-              backgroundColor: 'transparent',
-              border: '1px solid var(--border-card)',
-              color: 'var(--text-muted)',
-              fontSize: 12,
-              cursor: 'pointer'
-            }}
-          >
-            🔁 Regenerar
-          </button>
+        {/* Ações da resposta: copiar, PDF, fontes e regenerar (última) */}
+        {isAssistant && (
+          <>
+            <div
+              className="msg-action-row"
+              style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', opacity: showRegenerate ? 1 : undefined }}
+            >
+              <ActionButton onClick={handleCopy} label={copied ? '✓ Copiado' : '📋 Copiar'} />
+              <ActionButton
+                onClick={handleSavePdf}
+                label={savingPdf ? '⏳ Gerando…' : savedPath ? '✓ Salvo' : '📄 Salvar PDF'}
+                title="Salvar esta resposta como PDF em ~/Downloads/Gemini Desktop"
+                disabled={savingPdf}
+              />
+              {sources.length > 0 && (
+                <ActionButton
+                  onClick={() => setShowSources((prev) => !prev)}
+                  label={showSources ? '▲ Fontes' : `🔗 Fontes (${sources.length})`}
+                />
+              )}
+              {showRegenerate && onRegenerate && (
+                <ActionButton onClick={onRegenerate} label="🔁 Regenerar" title="Descartar esta resposta e gerar outra" />
+              )}
+            </div>
+            {savedPath && (
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--status-completed)' }}>
+                ✓ PDF salvo em {savedPath}
+              </div>
+            )}
+            {showSources && sources.length > 0 && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  backgroundColor: 'var(--bg-sidebar)',
+                  border: '1px solid var(--border-subtle)'
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600,
+                    marginBottom: 6
+                  }}
+                >
+                  Fontes mencionadas na resposta
+                </div>
+                {sources.map((s, i) => (
+                  <div key={s.url} style={{ display: 'flex', gap: 8, padding: '4px 0', fontSize: 13 }}>
+                    <span style={{ color: 'var(--text-muted)', flexShrink: 0, minWidth: 16 }}>{i + 1}.</span>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenSource(s.url)}
+                      title={s.url}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: 'var(--accent-blue)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontSize: 13,
+                        lineHeight: 1.4,
+                        wordBreak: 'break-word'
+                      }}
+                    >
+                      {s.text} ↗
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   )
 }
+
+const ActionButton: React.FC<{
+  onClick: () => void
+  label: string
+  title?: string
+  disabled?: boolean
+}> = ({ onClick, label, title, disabled }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={title}
+    disabled={disabled}
+    style={{
+      padding: '4px 10px',
+      borderRadius: 12,
+      backgroundColor: 'transparent',
+      border: '1px solid var(--border-card)',
+      color: 'var(--text-muted)',
+      fontSize: 12,
+      cursor: disabled ? 'wait' : 'pointer',
+      transition: 'color 0.15s, border-color 0.15s'
+    }}
+  >
+    {label}
+  </button>
+)

@@ -33,6 +33,7 @@ interface ChatViewProps {
   cwd?: string
   onRegenerate?: () => void
   onEditMessage?: (newText: string) => void
+  conversationTitle?: string
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -59,7 +60,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onRemoveFile,
   cwd,
   onRegenerate,
-  onEditMessage
+  onEditMessage,
+  conversationTitle
 }) => {
   // Índices das mensagens-alvo das ações: último prompt do usuário e última resposta/erro do assistente
   let lastUserIdx = -1
@@ -117,6 +119,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             onEdit={!isStreaming && onEditMessage ? onEditMessage : undefined}
             showRegenerate={idx === lastAssistantOrErrIdx}
             showEdit={idx === lastUserIdx}
+            conversationTitle={conversationTitle}
           />
         ))}
 

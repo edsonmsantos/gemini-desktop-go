@@ -218,6 +218,37 @@ export async function uploadAttachment(file: File): Promise<string | null> {
   }
 }
 
+// exportResponsePdf salva uma resposta markdown como PDF em
+// ~/Downloads/Gemini Desktop e devolve o caminho de exibição (~).
+export async function exportResponsePdf(title: string, markdown: string): Promise<{ displayPath: string } | null> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/export/pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, markdown })
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.displayPath ? { displayPath: data.displayPath } : null
+  } catch {
+    return null
+  }
+}
+
+// openExternalURL abre uma URL http/https no navegador padrão do sistema
+export async function openExternalURL(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/open-url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 // pasteClipboardImage lê a imagem da clipboard do sistema via backend
 // (WebKitGTK não expõe imagens no evento paste) e devolve o caminho do anexo,
 // ou null se não houver imagem.
