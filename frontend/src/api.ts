@@ -1,7 +1,18 @@
 import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
 
+declare module 'react' {
+  // Permite custom properties (--var) em objetos de estilo
+  interface CSSProperties {
+    [key: `--${string}`]: string | undefined
+  }
+}
+
 declare global {
   interface Window {
+    runtime?: {
+      OnFileDrop?: (cb: (x: number, y: number, paths: string[]) => void, useDropTarget?: boolean) => void
+      OnFileDropOff?: () => void
+    }
     __GMD_API__?: string
     __GEMINI_DESKTOP_CONFIG__?: {
       port?: number

@@ -177,3 +177,8 @@ textarea, input {
   user-select: text;
   -webkit-user-select: text;
 }
+
+/* Alvo de drop ativo do Wails (desktop): borda tracejada azul */
+.wails-drop-target-active {
+  border: 2px dashed var(--accent-blue) !important;
+}

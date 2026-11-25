@@ -231,6 +231,12 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 19, G: 19, B: 20, A: 255}, // #131314
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop:     true, // caminhos absolutos dos arquivos soltos
+			DisableWebViewDrop: true, // evita abrir arquivo acidentalmente no webview
+			CSSDropProperty:    "--wails-drop-target",
+			CSSDropValue:       "drop",
+		},
 		Linux: &linux.Options{
 			Icon: appIcon,
 		},

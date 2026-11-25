@@ -316,6 +316,20 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     const plainText = e.clipboardData.getData('text/plain')
     const raw = uriList || (gnomeList && gnomeList.includes('file://') ? gnomeList : '') || (plainText && plainText.includes('file://') ? plainText : '')
 
+    // Cola caminho absoluto puro como arquivo (ex.: "/home/user/doc.pdf" vindo
+    // de gerenciadores que só expõem text/plain sem file://)
+    if (!raw && plainText) {
+      const candidate = plainText.trim()
+      const lastSegment = candidate.split(/[/\\]/).pop() || ''
+      if (
+        candidate.startsWith('/') && candidate.indexOf('\n') === -1 &&
+        !candidate.includes(' ') && lastSegment.includes('.')
+      ) {
+        e.preventDefault()
+        onAddFiles?.([candidate])
+        return
+      }
+    }
     if (raw && raw.includes('file://')) {
       const lines = raw.split(/[\r\n]+/)
       const extracted: string[] = []
@@ -462,8 +476,9 @@ export const PromptBar: React.FC<PromptBarProps> = ({
         borderRadius: 24,
         boxShadow: 'var(--shadow-prompt)',
         padding: dragging ? '9px 13px 7px 13px' : '10px 14px 8px 14px',
-        transition: 'border-color 0.2s, box-shadow 0.2s'
-      }}
+        transition: 'border-color 0.2s, box-shadow 0.2s',
+        '--wails-drop-target': 'drop'
+      } as React.CSSProperties}
     >
       {/* Painel flutuante de Skills (estilo ZCode) */}
       {showSkills && (

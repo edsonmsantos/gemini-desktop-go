@@ -83,6 +83,22 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
   const [serverPort, setServerPort] = useState<number>(8399)
   const [agentCmd, setAgentCmd] = useState<string>('')
 
+  // Drag & drop nativo (Wails ≥ v2.16): caminhos absolutos dos arquivos soltos
+  useEffect(() => {
+    const rt = window.runtime as { OnFileDrop?: (cb: (x: number, y: number, paths: string[]) => void, useDropTarget?: boolean) => void } | undefined
+    if (!rt?.OnFileDrop) return
+    rt.OnFileDrop((_x: number, _y: number, paths: string[]) => {
+      if (!paths || paths.length === 0) return
+      setAttachedFiles((prev) => {
+        const combined = [...prev]
+        for (const f of paths) {
+          if (!combined.includes(f) && combined.length < 10) combined.push(f)
+        }
+        return combined
+      })
+    }, true) // useDropTarget: só elementos com --wails-drop-target
+  }, [])
+
   // Listener global para Command Center (Ctrl+K / Cmd+K)
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
