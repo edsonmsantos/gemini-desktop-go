@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,4 +217,174 @@ func TestServerV2_ConversationsLifecycle(t *testing.T) {
 		t.Fatalf("falha no DELETE /api/conversations/{id}: %v", err)
 	}
 	resp.Body.Close()
+}
+
+// TestServerV2_AttachmentAndRegenerate cobre o upload de anexos (print colado/
+// drag & drop) e o fluxo de regenerar/editar o último turno.
+func TestServerV2_AttachmentAndRegenerate(t *testing.T) {
+	ts, client, st := setupV2TestServer(t)
+	defer ts.Close()
+	defer client.Close()
+	defer st.Close()
+
+	cwd := t.TempDir()
+
+	// 1. Upload de anexo (base64 válido)
+	b64 := "aGVsbG8gd29ybGQ=" // "hello world"
+	body, _ := json.Marshal(map[string]string{"filename": "anexo teste.txt", "dataBase64": b64})
+	resp, err := http.Post(ts.URL+"/api/attachments", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("falha no upload: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("esperava 200 no upload, obteve %d", resp.StatusCode)
+	}
+	var up struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&up); err != nil {
+		t.Fatalf("falha ao decodificar resposta do upload: %v", err)
+	}
+	if up.Path == "" {
+		t.Fatal("esperava path no resposta do upload")
+	}
+	data, err := os.ReadFile(up.Path)
+	if err != nil || string(data) != "hello world" {
+		t.Fatalf("conteúdo salvo incorreto: %v %q", err, string(data))
+	}
+
+	// 2. Upload com base64 inválido deve dar 400
+	badBody, _ := json.Marshal(map[string]string{"filename": "x.png", "dataBase64": "###"})
+	resp2, err := http.Post(ts.URL+"/api/attachments", "application/json", bytes.NewReader(badBody))
+	if err != nil {
+		t.Fatalf("falha no upload inválido: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("esperava 400 para base64 inválido, obteve %d", resp2.StatusCode)
+	}
+
+	// 3. Conversa + prompt com o fake agent
+	createBody, _ := json.Marshal(map[string]string{"cwd": cwd})
+	resp3, err := http.Post(ts.URL+"/api/conversations", "application/json", bytes.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("falha ao criar conversa: %v", err)
+	}
+	defer resp3.Body.Close()
+	var conv struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp3.Body).Decode(&conv); err != nil {
+		t.Fatalf("falha ao decodificar conversa: %v", err)
+	}
+
+	// Prompt 1 com anexo do upload (exercita meta de arquivos)
+	promptBody, _ := json.Marshal(map[string]interface{}{"text": "primeira pergunta", "files": []string{up.Path}})
+	resp4, err := http.Post(ts.URL+"/api/conversations/"+conv.ID+"/prompt", "application/json", bytes.NewReader(promptBody))
+	if err != nil {
+		t.Fatalf("falha no prompt: %v", err)
+	}
+	resp4.Body.Close()
+
+	// Aguarda o turno do fake agent terminar
+	deadline := time.Now().Add(5 * time.Second)
+	var msgs []*store.Message
+	for time.Now().Before(deadline) {
+		got, err := st.GetMessages(conv.ID)
+		if err != nil {
+			t.Fatalf("falha ao ler mensagens: %v", err)
+		}
+		done := false
+		for _, m := range got {
+			if m.Role == "assistant" && strings.Contains(m.Content, "fake") {
+				done = true
+			}
+		}
+		if done {
+			msgs = got
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if len(msgs) == 0 {
+		t.Fatal("turno do fake agent não produziu resposta a tempo")
+	}
+	if len(msgs) < 2 {
+		t.Fatalf("esperava >=2 mensagens (user+assistant), obteve %d", len(msgs))
+	}
+
+	// 4. Regenerar: trunca o último turno e reenvia
+	resp5, err := http.Post(ts.URL+"/api/conversations/"+conv.ID+"/regenerate", "application/json", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		t.Fatalf("falha no regenerate: %v", err)
+	}
+	resp5.Body.Close()
+	if resp5.StatusCode != http.StatusOK {
+		t.Fatalf("esperava 200 no regenerate, obteve %d", resp5.StatusCode)
+	}
+
+	// Aguarda o novo turno terminar e valida a estrutura
+	deadline = time.Now().Add(5 * time.Second)
+	var finalMsgs []*store.Message
+	for time.Now().Before(deadline) {
+		got, err := st.GetMessages(conv.ID)
+		if err != nil {
+			t.Fatalf("falha ao ler mensagens pós-regenerate: %v", err)
+		}
+		assistantCount := 0
+		for _, m := range got {
+			if m.Role == "assistant" {
+				assistantCount++
+			}
+		}
+		if assistantCount >= 1 && len(got) >= 2 && got[0].Role == "user" {
+			time.Sleep(800 * time.Millisecond) // assenta o restante do turno (plan/tool_call)
+			finalMsgs, _ = st.GetMessages(conv.ID)
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if finalMsgs == nil {
+		got, _ := st.GetMessages(conv.ID)
+		for _, m := range got {
+			t.Logf("pós-regenerate: seq=%d role=%s content=%.60q meta=%.60q", m.Seq, m.Role, m.Content, m.Meta)
+		}
+		t.Fatal("regenerate não produziu novo turno a tempo")
+	}
+	// A primeira mensagem deve ser o prompt do usuário reenviado
+	if finalMsgs[0].Role != "user" || finalMsgs[0].Content != "primeira pergunta" {
+		t.Fatalf("prompt do usuário não foi reposto corretamente: %+v", finalMsgs[0])
+	}
+
+	// 5. Regenerar com edição de texto
+	resp6, err := http.Post(ts.URL+"/api/conversations/"+conv.ID+"/regenerate", "application/json", bytes.NewReader([]byte(`{"text":"pergunta editada"}`)))
+	if err != nil {
+		t.Fatalf("falha no regenerate com edição: %v", err)
+	}
+	resp6.Body.Close()
+	if resp6.StatusCode != http.StatusOK {
+		t.Fatalf("esperava 200 no regenerate com edição, obteve %d", resp6.StatusCode)
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	var editedMsgs []*store.Message
+	for time.Now().Before(deadline) {
+		got, err := st.GetMessages(conv.ID)
+		if err != nil {
+			t.Fatalf("falha ao ler mensagens pós-edição: %v", err)
+		}
+		if len(got) >= 2 && got[0].Role == "user" && got[0].Content == "pergunta editada" {
+			time.Sleep(800 * time.Millisecond)
+			editedMsgs, _ = st.GetMessages(conv.ID)
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if editedMsgs == nil {
+		t.Fatal("edição não produziu novo turno a tempo")
+	}
+	if editedMsgs[0].Content != "pergunta editada" {
+		t.Fatalf("esperava texto editado, obteve %q", editedMsgs[0].Content)
+	}
 }

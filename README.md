@@ -7,7 +7,10 @@ Um cliente desktop nativo (Go + React/Wails) no estilo do Gemini, que conversa c
 - 🖥️ **Janela nativa** (Wails v2 + WebKitGTK) — binário único de ~15 MB, nunca abre navegador
 - 🤖 **Multi-agente ACP**: `agy acp` (default, usa sua conta Google autenticada) e `gemini --acp`
 - 💬 Chat com **streaming**, *thinking* colapsável, tool calls coloridos, planos e **Permitir/Negar**
-- 📎 **Anexos multimodais**: cole arquivos do gerenciador ou use o seletor nativo — imagens vão como base64, demais arquivos por caminho
+- 📎 **Anexos multimodais**: cole arquivos do gerenciador, **cole screenshots com Ctrl+V**, **arraste arquivos** para a conversa ou use o seletor nativo — imagens vão como base64, demais arquivos por caminho
+- ✏️ **Editar e Regenerar**: corrija a última mensagem ou gere outra resposta com um clique
+- 🔔 **Notificações nativas** quando o agente termina a resposta (`notify-send`; desabilite com `"notifications": false` no config.json)
+- 🩹 **Erros em linguagem humana** com botão "Tentar novamente" — sem mensagens técnicas
 - 🗂️ **Workspaces**: pastas recentes, escolha manual, seletor nativo ou **pasta temporária automática** por conversa
 - 💾 **Histórico persistente** (SQLite pure-Go) com busca, renomear, retomar sessões (`session/load`) e troca de modelo
 - 🌗 **Temas dark/light** fiéis ao Gemini, avatar condicional com plano da conta (ex.: "Google AI Pro")
@@ -116,6 +119,8 @@ Para usar o Gemini CLI oficial:
      | `PATCH` | `/api/conversations/{id}` | Atualiza título ou altera modelo da conversa via `session/set_model` |
      | `DELETE` | `/api/conversations/{id}` | Remove a conversa e seu histórico do banco |
      | `POST` | `/api/conversations/{id}/prompt` | Envia prompt do usuário com suporte a anexos multimodais (`text` + `files: []string`) |
+     | `POST` | `/api/conversations/{id}/regenerate` | Descarta o último turno e reenvia o último prompt (`text` opcional para edição) |
+     | `POST` | `/api/attachments` | Salva anexo enviado em base64 (print colado/drag & drop) e retorna o caminho |
      | `POST` | `/api/conversations/{id}/resume` | Retoma sessão anterior via `session/load` do ACP |
      | `GET` | `/api/models` | Lista modelos disponíveis anunciados pelo agente ACP |
      | `GET` | `/api/workspaces` | Lista diretórios de trabalho recentes registrados |

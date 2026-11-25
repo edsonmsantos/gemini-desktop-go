@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -84,10 +86,13 @@ type Server struct {
 
 	clientsMu sync.Mutex
 	wsClients map[*websocket.Conn]bool
+	writeMu   sync.Mutex // serializa writes WS (gorilla exige um único writer por conn)
 
 	skillsMu      sync.Mutex
 	skillsCache   map[string]skillsCacheEntry
 	userSkillsDir string
+
+	notifications bool
 
 	mcpClient *mcp.Client
 	mcpMu     sync.Mutex
@@ -156,6 +161,21 @@ func (s *Server) getTempWorkspacesDir() string {
 		return s.tempWorkspacesDir
 	}
 	return filepath.Join(os.TempDir(), "geminidesktop")
+}
+
+// clientOrError responde 503 se o agente ACP não está disponível (ex.: falha
+// ao iniciar o processo). Retorna true se é seguro usar s.client.
+func (s *Server) clientOrError(w http.ResponseWriter) bool {
+	if s.client == nil {
+		http.Error(w, "agente ACP indisponível (falha ao iniciar o agente)", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// SetNotificationsEnabled liga/desliga notificações nativas de fim de turno
+func (s *Server) SetNotificationsEnabled(enabled bool) {
+	s.notifications = enabled
 }
 
 // SetUserSkillsDir define o diretório raiz das skills de usuário (global)
@@ -250,6 +270,9 @@ func validateImageFile(path string) error {
 }
 
 func (s *Server) ensureActiveSession(ctx context.Context, conv *store.Conversation) (string, error) {
+	if s.client == nil {
+		return "", errors.New("agente ACP indisponível (falha ao iniciar o agente)")
+	}
 	if s.client == nil {
 		return "", errors.New("cliente ACP não inicializado")
 	}
@@ -347,6 +370,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/mcp", s.handleListMCP)
 	s.mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
 	s.mux.HandleFunc("GET /api/search", s.handleSearch)
+	s.mux.HandleFunc("POST /api/attachments", s.handleAttachment)
+	s.mux.HandleFunc("GET /api/clipboard/image", s.handleClipboardImage)
 
 	// Endpoints v2 de conversas
 	s.mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)
@@ -357,6 +382,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/conversations/{id}/capabilities", s.handleConversationCapabilities)
 	s.mux.HandleFunc("POST /api/conversations/{id}/mode", s.handleConversationMode)
 	s.mux.HandleFunc("POST /api/conversations/{id}/prompt", s.handleConversationPrompt)
+	s.mux.HandleFunc("POST /api/conversations/{id}/regenerate", s.handleConversationRegenerate)
 	s.mux.HandleFunc("POST /api/conversations/{id}/resume", s.handleConversationResume)
 
 	// Endpoints legados (deprecated)
@@ -380,6 +406,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/agent-info
 func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
+	// NOTA: já é nil-safe — o email vem do arquivo google_accounts.json e o
+	// tier é condicional (abaixo); não usar clientOrError aqui.
 	w.Header().Set("Content-Type", "application/json")
 
 	path := s.googleAccountsPath
@@ -425,6 +453,9 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/models
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	models := s.client.Models()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(models)
@@ -671,6 +702,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/conversations {cwd, modelId?, modeId?}
 func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	var req struct {
 		CWD     string `json:"cwd"`
 		ModelID string `json:"modelId"`
@@ -810,6 +844,9 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/conversations/{id}
 func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	id := r.PathValue("id")
 	if s.store == nil {
 		http.Error(w, "store não configurado", http.StatusInternalServerError)
@@ -841,6 +878,9 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 
 // PATCH /api/conversations/{id} {title?, modelId?}
 func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	id := r.PathValue("id")
 	if s.store == nil {
 		http.Error(w, "store não configurado", http.StatusInternalServerError)
@@ -895,6 +935,9 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 
 // GET /api/conversations/{id}/capabilities
 func (s *Server) handleConversationCapabilities(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	id := r.PathValue("id")
 	if s.store == nil {
 		http.Error(w, "store não configurado", http.StatusInternalServerError)
@@ -940,6 +983,9 @@ func (s *Server) handleConversationCapabilities(w http.ResponseWriter, r *http.R
 
 // POST /api/conversations/{id}/mode {modeId}
 func (s *Server) handleConversationMode(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	id := r.PathValue("id")
 	if s.store == nil {
 		http.Error(w, "store não configurado", http.StatusInternalServerError)
@@ -1073,8 +1119,8 @@ func (s *Server) handleConversationPrompt(w http.ResponseWriter, r *http.Request
 		if title == "" && len(req.Files) > 0 {
 			title = filepath.Base(req.Files[0])
 		}
-		if len(title) > 60 {
-			title = title[:60] + "..."
+		if titleRunes := []rune(title); len(titleRunes) > 60 {
+			title = string(titleRunes[:60]) + "..."
 		}
 		_ = s.store.UpdateConversationTitle(id, title)
 	}
@@ -1129,9 +1175,42 @@ func (s *Server) handleConversationPrompt(w http.ResponseWriter, r *http.Request
 	}
 	_ = s.store.AppendMessage(userMsg)
 
-	eventCh := make(chan acp.Event, 50)
+	eventCh := make(chan acp.Event, 200)
+	s.startTurn(id, sessID, contentBlocks, eventCh)
 
-	// Goroutine que processa eventos do ACP, persiste no SQLite e faz broadcast no WebSocket
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":         "started",
+		"conversationId": id,
+		"sessionId":      sessID,
+	})
+}
+
+// startTurn processa eventos do ACP, persiste no SQLite, faz broadcast no WebSocket
+// e dispara notificação nativa no fim do turno (se habilitada).
+func (s *Server) startTurn(id, sessID string, contentBlocks []interface{}, eventCh chan acp.Event) {
+	// Panic em goroutine própria CRASHA o processo (sem recover do net/http)
+	if s.client == nil {
+		ev := acp.Event{Type: "error", ConversationID: id, Error: &acp.ErrorEvent{Msg: "agente ACP indisponível (falha ao iniciar o agente)"}}
+		select {
+		case eventCh <- ev:
+		default:
+		}
+		close(eventCh)
+		s.Broadcast(ev)
+		return
+	}
+	var turnText strings.Builder
+	var lastErr string
+
+	// SQLite indisponível: eventos seguem para a UI ao vivo, mas nada persiste
+	persist := s.store != nil
+	saveMsg := func(msg *store.Message) {
+		if persist {
+			_ = s.store.AppendMessage(msg)
+		}
+	}
+
 	go func() {
 		for ev := range eventCh {
 			ev.ConversationID = id
@@ -1139,20 +1218,23 @@ func (s *Server) handleConversationPrompt(w http.ResponseWriter, r *http.Request
 			switch ev.Type {
 			case "message_chunk":
 				if ev.MessageChunk != nil {
-					_, _ = s.store.AppendOrUpdateChunk(id, "assistant", ev.MessageChunk.Text)
+					turnText.WriteString(ev.MessageChunk.Text)
+					if persist {
+						_, _ = s.store.AppendOrUpdateChunk(id, "assistant", ev.MessageChunk.Text)
+					}
 				}
 			case "thought_chunk":
-				if ev.ThoughtChunk != nil {
+				if ev.ThoughtChunk != nil && persist {
 					_, _ = s.store.AppendOrUpdateChunk(id, "thought", ev.ThoughtChunk.Text)
 				}
 			case "tool_call":
-				if ev.ToolCall != nil {
+				if ev.ToolCall != nil && persist {
 					_, _ = s.store.UpsertToolCallMessage(id, ev.ToolCall.ID, string(ev.ToolCall.Status), ev.ToolCall.Title, ev.ToolCall.Kind, ev.ToolCall.RawInput)
 				}
 			case "plan":
 				if ev.Plan != nil {
 					planBytes, _ := json.Marshal(ev.Plan)
-					_ = s.store.AppendMessage(&store.Message{
+					saveMsg(&store.Message{
 						ConversationID: id,
 						Role:           "plan",
 						Content:        "Plano de execução",
@@ -1162,7 +1244,7 @@ func (s *Server) handleConversationPrompt(w http.ResponseWriter, r *http.Request
 			case "permission_request":
 				if ev.PermissionRequest != nil {
 					permBytes, _ := json.Marshal(ev.PermissionRequest)
-					_ = s.store.AppendMessage(&store.Message{
+					saveMsg(&store.Message{
 						ConversationID: id,
 						Role:           "permission",
 						Content:        ev.PermissionRequest.ToolCall.Title,
@@ -1171,11 +1253,17 @@ func (s *Server) handleConversationPrompt(w http.ResponseWriter, r *http.Request
 				}
 			case "turn_done":
 				if ev.TurnDone != nil {
-					_ = s.store.UpdateAssistantTurnDone(id, ev.TurnDone.StopReason)
+					if persist {
+						_ = s.store.UpdateAssistantTurnDone(id, ev.TurnDone.StopReason)
+					}
+					if s.notifications && ev.TurnDone.StopReason == "end_turn" {
+						go s.desktopNotify("Gemini Desktop", snippetOf(turnText.String()))
+					}
 				}
 			case "error":
 				if ev.Error != nil {
-					_ = s.store.AppendMessage(&store.Message{
+					lastErr = ev.Error.Msg
+					saveMsg(&store.Message{
 						ConversationID: id,
 						Role:           "error",
 						Content:        ev.Error.Msg,
@@ -1185,6 +1273,11 @@ func (s *Server) handleConversationPrompt(w http.ResponseWriter, r *http.Request
 
 			// Broadcast WebSocket
 			s.Broadcast(ev)
+		}
+
+		// Turno encerrado com erro sem turn_done: avisa também
+		if lastErr != "" && s.notifications {
+			go s.desktopNotify("Gemini Desktop", "⚠️ O assistente teve um problema: "+snippetOf(lastErr))
 		}
 	}()
 
@@ -1198,6 +1291,328 @@ func (s *Server) handleConversationPrompt(w http.ResponseWriter, r *http.Request
 			log.Printf("[conversation prompt error] %v", err)
 		}
 	}()
+}
+
+// snippetOf resume um texto para corpo de notificação (primeiras ~80 runas)
+func snippetOf(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "Nova resposta pronta."
+	}
+	runes := []rune(text)
+	if len(runes) > 80 {
+		return string(runes[:80]) + "…"
+	}
+	return text
+}
+
+// desktopNotify envia notificação nativa via notify-send (silencioso se indisponível)
+func (s *Server) desktopNotify(title, body string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "notify-send", "-a", "Gemini Desktop", "-i", "geminidesktop-go", "-u", "normal", title, body)
+	if err := cmd.Run(); err != nil {
+		log.Printf("[aviso] notify-send indisponível: %v", err)
+	}
+}
+
+// handleAttachment salva um anexo enviado em base64 (print colado, drag & drop)
+// em ~/.geminidesktop/attachments e devolve o caminho absoluto.
+func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Filename string `json:"filename"`
+		Data     string `json:"dataBase64"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Data == "" {
+		http.Error(w, "dataBase64 obrigatório", http.StatusBadRequest)
+		return
+	}
+	data, err := base64.StdEncoding.DecodeString(req.Data)
+	if err != nil {
+		http.Error(w, "base64 inválido", http.StatusBadRequest)
+		return
+	}
+	const maxAttachment = 25 << 20 // 25 MB
+	if len(data) == 0 || len(data) > maxAttachment {
+		http.Error(w, "anexo vazio ou maior que 25 MB", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	name := sanitizeFilename(req.Filename)
+	if name == "" {
+		// Nome padrão para anexos sem nome; extensão pelo CONTEÚDO real
+		// (detectImageMime tem fallback octet-stream, nunca vazio)
+		ext := ""
+		if len(data) > 8 {
+			if mime := http.DetectContentType(data); strings.HasPrefix(mime, "image/") {
+				switch {
+				case strings.Contains(mime, "jpeg"):
+					ext = ".jpg"
+				case strings.Contains(mime, "webp"):
+					ext = ".webp"
+				case strings.Contains(mime, "gif"):
+					ext = ".gif"
+				case strings.Contains(mime, "bmp"):
+					ext = ".bmp"
+				default:
+					ext = ".png"
+				}
+			}
+		}
+		if ext != "" {
+			name = "captura-" + time.Now().Format("20060102-150405") + ext
+		} else {
+			name = "anexo-" + time.Now().Format("20060102-150405")
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		http.Error(w, "falha ao resolver diretório do usuário", http.StatusInternalServerError)
+		return
+	}
+	dir := filepath.Join(home, ".geminidesktop", "attachments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		http.Error(w, "falha ao criar diretório de anexos", http.StatusInternalServerError)
+		return
+	}
+
+	// Prefixo aleatório para nunca sobrescrever anexos anteriores
+	var rnd [4]byte
+	_, _ = rand.Read(rnd[:])
+	path := filepath.Join(dir, fmt.Sprintf("%x-%s", rnd, name))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		http.Error(w, "falha ao salvar anexo", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"path": path})
+}
+
+// handleClipboardImage salva a imagem atualmente na clipboard do sistema como
+// anexo e devolve o caminho. Necessário porque o WebKitGTK não expõe imagens
+// da clipboard no evento paste do webview.
+func (s *Server) handleClipboardImage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	// 1. Descobre se há imagem na clipboard (lista de targets)
+	targets, err := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-t", "TARGETS", "-o").Output()
+	if err != nil {
+		s.writeClipboardMiss(w)
+		return
+	}
+	clipType := ""
+	for _, t := range []string{"image/png", "image/jpeg"} {
+		if strings.Contains(string(targets), t) {
+			clipType = t
+			break
+		}
+	}
+	if clipType == "" {
+		s.writeClipboardMiss(w)
+		return
+	}
+
+	// 2. Lê os bytes da imagem
+	data, err := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-t", clipType, "-o").Output()
+	if err != nil || len(data) == 0 {
+		s.writeClipboardMiss(w)
+		return
+	}
+
+	// 3. Salva como anexo (mesmo diretório de attachments)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		s.writeClipboardMiss(w)
+		return
+	}
+	dir := filepath.Join(home, ".geminidesktop", "attachments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		s.writeClipboardMiss(w)
+		return
+	}
+	ext := ".png"
+	if clipType == "image/jpeg" {
+		ext = ".jpg"
+	}
+	var rnd [4]byte
+	_, _ = rand.Read(rnd[:])
+	path := filepath.Join(dir, fmt.Sprintf("%x-captura-%s%s", rnd, time.Now().Format("20060102-150405"), ext))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		s.writeClipboardMiss(w)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"hasImage": true, "path": path})
+}
+
+// writeClipboardMiss responde que não há imagem na clipboard
+func (s *Server) writeClipboardMiss(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"hasImage": false})
+}
+
+// sanitizeFilename limpa um nome de arquivo enviado pelo cliente
+func sanitizeFilename(name string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '.', r == '-', r == '_', r == '(', r == ')':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	cleaned := strings.Trim(b.String(), "-.")
+	if cleaned == "" || cleaned == "." || len(cleaned) > 120 {
+		return ""
+	}
+	return cleaned
+}
+
+// recoverFilesFromMeta extrai os caminhos de arquivos do meta de uma mensagem
+// de usuário (formato legado: "nome (caminho)")
+func recoverFilesFromMeta(meta string) []string {
+	if meta == "" {
+		return nil
+	}
+	var raw []string
+	if err := json.Unmarshal([]byte(meta), &raw); err != nil {
+		return nil
+	}
+	var files []string
+	for _, entry := range raw {
+		idx := strings.LastIndex(entry, " (")
+		if idx < 0 || !strings.HasSuffix(entry, ")") {
+			continue
+		}
+		path := entry[idx+2 : len(entry)-1]
+		if filepath.IsAbs(path) {
+			if _, err := os.Stat(path); err == nil {
+				files = append(files, path)
+			}
+		}
+	}
+	return files
+}
+
+// POST /api/conversations/{id}/regenerate — descarta o último turno e reenvia
+// o último prompt do usuário (com text opcional para edição).
+func (s *Server) handleConversationRegenerate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.store == nil {
+		http.Error(w, "store não configurado", http.StatusInternalServerError)
+		return
+	}
+	conv, err := s.store.GetConversation(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Text string `json:"text,omitempty"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	msgs, err := s.store.GetMessages(id)
+	if err != nil {
+		http.Error(w, "falha ao carregar histórico: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Localiza o último prompt do usuário
+	var lastUser *store.Message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			lastUser = msgs[i]
+			break
+		}
+	}
+	if lastUser == nil {
+		http.Error(w, "nenhuma mensagem do usuário para regenerar", http.StatusBadRequest)
+		return
+	}
+
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		text = lastUser.Content
+	}
+	files := recoverFilesFromMeta(lastUser.Meta)
+
+	if text == "" && len(files) == 0 {
+		http.Error(w, "prompt sem conteúdo para reenviar", http.StatusBadRequest)
+		return
+	}
+
+	// Revalida arquivos (podem ter sido apagados desde então)
+	var validFiles []string
+	for _, f := range files {
+		if _, err := os.Stat(f); err == nil {
+			validFiles = append(validFiles, f)
+		}
+	}
+
+	// Garante a sessão ANTES de truncar: se falhar, o histórico permanece intacto
+	sessID, err := s.ensureActiveSession(r.Context(), conv)
+	if err != nil {
+		http.Error(w, "falha ao inicializar sessão do agente: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Trunca tudo a partir do último prompt (último turno completo)
+	if err := s.store.DeleteMessagesFrom(id, lastUser.Seq); err != nil {
+		http.Error(w, "falha ao truncar histórico: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Re-persiste o prompt do usuário (novo turno)
+	userMsg := &store.Message{
+		ConversationID: id,
+		Role:           "user",
+		Content:        text,
+		Meta:           lastUser.Meta,
+		CreatedAt:      time.Now().UnixMilli(),
+	}
+	_ = s.store.AppendMessage(userMsg)
+
+	var contentBlocks []interface{}
+	if text != "" {
+		contentBlocks = append(contentBlocks, map[string]string{
+			"type": "text",
+			"text": text,
+		})
+	}
+	for _, f := range validFiles {
+		if stat, err := os.Stat(f); err == nil && !stat.IsDir() && isImageFile(f, stat.Size()) {
+			if data, err := os.ReadFile(f); err == nil {
+				contentBlocks = append(contentBlocks, map[string]string{
+					"type":     "image",
+					"data":     base64.StdEncoding.EncodeToString(data),
+					"mimeType": detectImageMime(f, data),
+				})
+				continue
+			}
+		}
+		contentBlocks = append(contentBlocks, map[string]string{
+			"type": "text",
+			"text": fmt.Sprintf("Arquivo anexado: %s", f),
+		})
+	}
+
+	eventCh := make(chan acp.Event, 200)
+	s.startTurn(id, sessID, contentBlocks, eventCh)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
@@ -1209,6 +1624,9 @@ func (s *Server) handleConversationPrompt(w http.ResponseWriter, r *http.Request
 
 // POST /api/conversations/{id}/resume
 func (s *Server) handleConversationResume(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	id := r.PathValue("id")
 	if s.store == nil {
 		http.Error(w, "store não configurado", http.StatusInternalServerError)
@@ -1263,6 +1681,9 @@ type sessionReq struct {
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	var req sessionReq
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1303,6 +1724,9 @@ type promptReq struct {
 }
 
 func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	var req promptReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -1330,7 +1754,7 @@ func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 
-	eventCh := make(chan acp.Event, 50)
+	eventCh := make(chan acp.Event, 200)
 
 	go func() {
 		for ev := range eventCh {
@@ -1361,6 +1785,9 @@ type permissionReq struct {
 }
 
 func (s *Server) handlePermission(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	var req permissionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
@@ -1381,6 +1808,9 @@ type cancelReq struct {
 }
 
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
+	if !s.clientOrError(w) {
+		return
+	}
 	var req cancelReq
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1434,13 +1864,28 @@ func (s *Server) Broadcast(ev acp.Event) {
 		return
 	}
 
+	// Snapshot das conexões sob lock; escrita fora do lock com deadline curto,
+	// para que um cliente WS lento/travado não bloqueie os broadcasts e o
+	// registro de novas conexões.
 	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
-
+	conns := make([]*websocket.Conn, 0, len(s.wsClients))
 	for conn := range s.wsClients {
+		conns = append(conns, conn)
+	}
+	s.clientsMu.Unlock()
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	for _, conn := range conns {
+		_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			_ = conn.Close()
-			delete(s.wsClients, conn)
+			s.clientsMu.Lock()
+			if _, ok := s.wsClients[conn]; ok {
+				_ = conn.Close()
+				delete(s.wsClients, conn)
+			}
+			s.clientsMu.Unlock()
 		}
 	}
 }

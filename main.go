@@ -95,6 +95,7 @@ func main() {
 
 	srv := server.NewServerV2(client, defaultCWD, web.Files, st)
 	srv.SetTempWorkspacesDir(cfg.GetTempWorkspacesDir())
+	srv.SetNotificationsEnabled(cfg.NotificationsEnabled())
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	httpServer := &http.Server{
 		Addr:    addr,
