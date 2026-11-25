@@ -393,6 +393,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/export/pdf", s.handleExportPDF)
 	s.mux.HandleFunc("POST /api/open-url", s.handleOpenURL)
 	s.mux.HandleFunc("POST /api/files/content", s.handleFileContent)
+	s.mux.HandleFunc("POST /api/sources/resolve", s.handleResolveSources)
 
 	// Endpoints v2 de conversas
 	s.mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)

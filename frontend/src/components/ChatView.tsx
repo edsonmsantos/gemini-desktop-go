@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react'
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { MessageBubble } from './MessageBubble'
 import { PromptBar } from './PromptBar'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -95,6 +95,42 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
     if (lastUserIdx !== -1 && lastAssistantOrErrIdx !== -1) break
   }
+
+  // Coleta URLs grounding-api-redirect dos tool calls
+  const redirectUrls = useMemo(() => {
+    const urls: string[] = []
+    const seen = new Set<string>()
+    const regex = /https:\/\/[^\s"']+grounding-api-redirect\/[^\s"'"')]+/g
+    for (const msg of messages) {
+      if (msg.role === 'tool_call' && msg.meta) {
+        try {
+          const tc = JSON.parse(msg.meta) as ToolCall
+          const targets: string[] = []
+          if (tc.rawInput) {
+            targets.push(JSON.stringify(tc.rawInput))
+          }
+          if (typeof tc.rawOutput === 'string') {
+            targets.push(tc.rawOutput)
+          }
+          for (const t of targets) {
+            let m: RegExpExecArray | null
+            regex.lastIndex = 0
+            while ((m = regex.exec(t)) !== null) {
+              const u = m[0]
+              if (!seen.has(u)) {
+                seen.add(u)
+                urls.push(u)
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return urls
+  }, [messages])
+
   // ===== Artefatos da conversa =====
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [artifactsOpen, setArtifactsOpen] = useState<boolean>(false)
@@ -343,6 +379,7 @@ ${isPreviewable(a.name) ? 'Clique para visualizar no app' : 'Clique para abrir n
             showRegenerate={idx === lastAssistantOrErrIdx}
             showEdit={idx === lastUserIdx}
             conversationTitle={conversationTitle}
+            redirectUrls={redirectUrls}
           />
         ))}
 

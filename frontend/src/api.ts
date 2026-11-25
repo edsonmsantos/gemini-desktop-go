@@ -1,4 +1,4 @@
-import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, Workspace, WSEvent } from './types'
+import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
 
 declare global {
   interface Window {
@@ -506,3 +506,19 @@ export async function fetchFileContent(path: string): Promise<FileContent | null
     return null
   }
 }
+
+export async function resolveSources(urls: string[]): Promise<SourceResolution[]> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/sources/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls })
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.resolved ?? []
+  } catch {
+    return []
+  }
+}
+

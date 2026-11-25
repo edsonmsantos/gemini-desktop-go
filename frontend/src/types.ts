@@ -176,3 +176,10 @@ export interface FileContent {
   mime: string
   content: string
 }
+
+export interface SourceResolution {
+  from: string
+  to: string
+  status: number
+}
+
