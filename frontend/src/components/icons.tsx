@@ -254,3 +254,10 @@ export const ExternalLinkIcon: React.FC<IconProps> = ({ size = 14, color = 'curr
     <line x1="10" y1="14" x2="21" y2="3" />
   </svg>
 )
+
+export const ClipboardIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColor', className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+  </svg>
+)

@@ -50,7 +50,7 @@ export async function fetchModels(): Promise<Model[]> {
   try {
     const res = await fetch(`${getBaseURL()}/api/models`)
     if (!res.ok) return []
-    return await res.json()
+    return (await res.json()) ?? []
   } catch {
     return []
   }
@@ -60,7 +60,7 @@ export async function fetchWorkspaces(): Promise<Workspace[]> {
   try {
     const res = await fetch(`${getBaseURL()}/api/workspaces`)
     if (!res.ok) return []
-    return await res.json()
+    return (await res.json()) ?? []
   } catch {
     return []
   }
@@ -71,7 +71,7 @@ export async function fetchConversations(): Promise<Conversation[]> {
   if (!res.ok) {
     throw new Error('Falha ao listar conversas')
   }
-  return res.json()
+  return (await res.json()) ?? []
 }
 
 export async function fetchConversation(id: string): Promise<{ conversation: Conversation; messages: Message[] }> {
@@ -79,7 +79,8 @@ export async function fetchConversation(id: string): Promise<{ conversation: Con
   if (!res.ok) {
     throw new Error('Falha ao carregar conversa')
   }
-  return res.json()
+  const data = await res.json()
+  return { conversation: data.conversation, messages: data.messages ?? [] }
 }
 
 export async function createConversation(cwd?: string, modelId?: string, modeId?: string): Promise<{
@@ -187,6 +188,63 @@ export async function selectFilesViaWails(): Promise<string[] | null> {
     }
   }
   return null
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
+// uploadAttachment salva um arquivo (print colado, drag & drop) no backend
+// e devolve o caminho absoluto para anexar na conversa.
+export async function uploadAttachment(file: File): Promise<string | null> {
+  try {
+    const dataBase64 = arrayBufferToBase64(await file.arrayBuffer())
+    const res = await fetch(`${getBaseURL()}/api/attachments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, dataBase64 })
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.path || null
+  } catch {
+    return null
+  }
+}
+
+// pasteClipboardImage lê a imagem da clipboard do sistema via backend
+// (WebKitGTK não expõe imagens no evento paste) e devolve o caminho do anexo,
+// ou null se não houver imagem.
+export async function pasteClipboardImage(): Promise<string | null> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/clipboard/image`)
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.hasImage ? data.path || null : null
+  } catch {
+    return null
+  }
+}
+
+// regenerateConversation descarta o último turno e reenvia o último prompt
+// do usuário (com text opcional para a edição de mensagem).
+export async function regenerateConversation(id: string, text?: string): Promise<{ status: string }> {
+  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}/regenerate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(text !== undefined ? { text } : {})
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(errText || 'Falha ao regenerar resposta')
+  }
+  return res.json()
 }
 
 export async function resumeConversation(id: string): Promise<{ sessionId: string }> {
@@ -302,10 +360,10 @@ export const wsManager = new WSManager()
 
 const skillsClientCache = new Map<string, { data: SkillsResponse; timestamp: number }>()
 
-export async function fetchSkills(cwd?: string): Promise<SkillsResponse> {
+export async function fetchSkills(cwd?: string, bypassCache = false): Promise<SkillsResponse> {
   const key = cwd || ''
   const cached = skillsClientCache.get(key)
-  if (cached && Date.now() - cached.timestamp < 30000) {
+  if (!bypassCache && cached && Date.now() - cached.timestamp < 30000) {
     return cached.data
   }
   const url = cwd ? `${getBaseURL()}/api/skills?cwd=${encodeURIComponent(cwd)}` : `${getBaseURL()}/api/skills`
@@ -314,8 +372,9 @@ export async function fetchSkills(cwd?: string): Promise<SkillsResponse> {
     throw new Error('Falha ao carregar skills')
   }
   const data = (await res.json()) as SkillsResponse
-  skillsClientCache.set(key, { data, timestamp: Date.now() })
-  return data
+  const normalized: SkillsResponse = { ...data, skills: data.skills ?? [] }
+  skillsClientCache.set(key, { data: normalized, timestamp: Date.now() })
+  return normalized
 }
 
 export async function fetchMCPServers(): Promise<MCPResponse> {
@@ -326,7 +385,8 @@ export async function fetchMCPServers(): Promise<MCPResponse> {
   if (!res.ok) {
     throw new Error('Falha ao carregar servidores MCP')
   }
-  return res.json()
+  const data = await res.json()
+  return { servers: data.servers ?? [], available: !!data.available }
 }
 
 export async function toggleMCPServer(name: string, enable: boolean): Promise<{ name: string; status: string; server?: MCPServer }> {

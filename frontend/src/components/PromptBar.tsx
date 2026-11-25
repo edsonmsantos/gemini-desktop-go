@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
-import { MicIcon, PlusIcon, SendIcon, StopIcon, FileIcon, CloseIcon, ZapIcon, SpinnerIcon } from './icons'
+import { MicIcon, PlusIcon, SendIcon, StopIcon, FileIcon, CloseIcon, ZapIcon, SpinnerIcon, ClipboardIcon } from './icons'
 import { ModelSelect } from './ModelSelect'
 import { ModeSelect } from './ModeSelect'
 import { Model, ModesInfo, Skill } from '../types'
+import { uploadAttachment, pasteClipboardImage } from '../api'
 import { selectFilesViaWails, fetchSkills } from '../api'
 
 interface PromptBarProps {
@@ -134,6 +135,9 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
   // Estado da paleta de skills
   const [showSkills, setShowSkills] = useState<boolean>(false)
+  const [dragging, setDragging] = useState<boolean>(false)
+  const [pastingImage, setPastingImage] = useState<boolean>(false)
+  const pasteHandledRef = useRef<boolean>(false)
   const [tokenRange, setTokenRange] = useState<{ start: number; end: number } | null>(null)
   const [skillQuery, setSkillQuery] = useState<string>('')
   const [skills, setSkills] = useState<Skill[]>([])
@@ -256,6 +260,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
   const canSend = (prompt.trim().length > 0 || files.length > 0) && !isStreaming
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    handlePasteKeyDown(e)
     if (showSkills) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -329,10 +334,76 @@ export const PromptBar: React.FC<PromptBarProps> = ({
       }
       if (extracted.length > 0) {
         e.preventDefault()
+        pasteHandledRef.current = true
         onAddFiles?.(extracted)
+        return
       }
     }
+
+    // Imagens coladas direto da clipboard (ex.: screenshot Ctrl+V no Chromium)
+    const items = Array.from(e.clipboardData?.items ?? [])
+    const imageFiles: File[] = []
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length > 0 && onAddFiles) {
+      e.preventDefault()
+      pasteHandledRef.current = true
+      void (async () => {
+        const paths: string[] = []
+        for (const file of imageFiles.slice(0, 10)) {
+          const path = await uploadAttachment(file)
+          if (path) paths.push(path)
+        }
+        if (paths.length > 0) onAddFiles?.(paths)
+      })()
+    }
   }
+
+  // Fallback nativo: WebKitGTK não entrega imagens no evento paste. Se o Ctrl+V
+  // não foi tratado pelo paste em ~350ms, pergunta ao backend se há imagem na clipboard.
+  const handlePasteKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'v') return
+    pasteHandledRef.current = false
+    window.setTimeout(async () => {
+      if (pasteHandledRef.current) return
+      const path = await pasteClipboardImage()
+      if (path) onAddFiles?.([path])
+    }, 350)
+  }
+
+  // Botão "Colar": lê a imagem da clipboard do sistema direto do backend
+  const handlePasteButtonClick = async () => {
+    if (!onAddFiles || pastingImage) return
+    setPastingImage(true)
+    try {
+      const path = await pasteClipboardImage()
+      if (path) onAddFiles([path])
+    } finally {
+      setPastingImage(false)
+    }
+  }
+
+  // Anexa arquivos soltos na conversa (conteúdo é enviado ao backend e salvo em temp)
+  const handleDrop = useCallback(
+    async (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      setDragging(false)
+      if (!onAddFiles) return
+      const dropped = Array.from(e.dataTransfer?.files ?? [])
+      if (dropped.length === 0) return
+      const paths: string[] = []
+      for (const file of dropped.slice(0, 10)) {
+        const path = await uploadAttachment(file)
+        if (path) paths.push(path)
+      }
+      if (paths.length > 0) onAddFiles(paths)
+    },
+    [onAddFiles]
+  )
 
   const handleSelectFilesClick = async () => {
     if (!hasNativePicker || !onAddFiles) return
@@ -344,6 +415,14 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
   return (
     <div
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (!dragging) setDragging(true)
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false)
+      }}
+      onDrop={(e) => void handleDrop(e)}
       style={{
         position: 'relative',
         display: 'flex',
@@ -352,10 +431,10 @@ export const PromptBar: React.FC<PromptBarProps> = ({
         maxWidth: 780,
         margin: '0 auto',
         backgroundColor: 'var(--bg-prompt)',
-        border: '1px solid var(--border-card)',
+        border: dragging ? '2px dashed var(--accent-blue)' : '1px solid var(--border-card)',
         borderRadius: 24,
         boxShadow: 'var(--shadow-prompt)',
-        padding: '10px 14px 8px 14px',
+        padding: dragging ? '9px 13px 7px 13px' : '10px 14px 8px 14px',
         transition: 'border-color 0.2s, box-shadow 0.2s'
       }}
     >
@@ -586,6 +665,29 @@ export const PromptBar: React.FC<PromptBarProps> = ({
       )}
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        {/* Botão Colar imagem da clipboard (fallback nativo do WebKitGTK) */}
+        <button
+          type="button"
+          onClick={handlePasteButtonClick}
+          title="Colar imagem da clipboard (print)"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            color: 'var(--text-primary)',
+            backgroundColor: pastingImage ? 'var(--bg-pill-hover)' : 'var(--bg-pill)',
+            marginTop: 2,
+            flexShrink: 0,
+            cursor: pastingImage ? 'wait' : 'pointer',
+            transition: 'background 0.15s'
+          }}
+        >
+          <ClipboardIcon size={16} className={pastingImage ? 'animate-spin' : ''} />
+        </button>
+
         {/* Botão + à esquerda (seletor nativo Wails ou desabilitado) */}
         <button
           type="button"

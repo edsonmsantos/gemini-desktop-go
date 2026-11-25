@@ -19,6 +19,7 @@ import {
   deleteConversation,
   sendPrompt,
   resumeConversation,
+  regenerateConversation,
   respondPermission,
   cancelTurn,
   wsManager
@@ -49,7 +50,12 @@ export const App: React.FC = () => {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [selectedCwd, setSelectedCwd] = useState<string>('')
   const [conversations, setConversations] = useState<Conversation[]>([])
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  // IDs temporários para mensagens otimistas: únicos mesmo no mesmo tick
+// (Date.now() puro colide; hack "-1" também)
+let tempIdCounter = 0
+const makeTempId = (): string => `tmp-${Date.now()}-${(++tempIdCounter).toString(36)}`
+
+const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [activeSessionId, setActiveSessionId] = useState<string>('')
   const [activeModes, setActiveModes] = useState<ModesInfo | null>(null)
   const [selectedModeId, setSelectedModeId] = useState<string>('')
@@ -243,7 +249,7 @@ export const App: React.FC = () => {
           setMessages((prev) => [
             ...prev,
             {
-              id: Date.now() - 1,
+              id: makeTempId(),
               conversationId: activeConvIdRef.current || '',
               seq: prev.length + 1,
               role: 'thought',
@@ -257,7 +263,7 @@ export const App: React.FC = () => {
           setMessages((prev) => [
             ...prev,
             {
-              id: Date.now(),
+              id: makeTempId(),
               conversationId: activeConvIdRef.current || '',
               seq: prev.length + 1,
               role: 'assistant',
@@ -269,7 +275,7 @@ export const App: React.FC = () => {
           setMessages((prev) => [
             ...prev,
             {
-              id: Date.now(),
+              id: makeTempId(),
               conversationId: activeConvIdRef.current || '',
               seq: prev.length + 1,
               role: 'error',
@@ -318,6 +324,44 @@ export const App: React.FC = () => {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
+  // Regenerar o último turno: trunca o histórico e reenvia o último prompt
+  const handleRegenerate = async () => {
+    if (!activeConversationId || isStreaming) return
+    try {
+      await regenerateConversation(activeConversationId)
+      const res = await fetchConversation(activeConversationId)
+      setMessages(res.messages || [])
+      setIsStreaming(true)
+      setStreamingText('')
+      setStreamingThought('')
+      setActiveToolCalls([])
+      setPendingPermission(null)
+      setActivePlan(null)
+      setProcessingConversationIds((prev) => new Set(prev).add(activeConversationId))
+    } catch {
+      // Falha silenciosa: histórico permanece intacto
+    }
+  }
+
+  // Editar o último prompt do usuário: trunca e reenvia com o novo texto
+  const handleEditMessage = async (newText: string) => {
+    if (!activeConversationId || isStreaming || !newText.trim()) return
+    try {
+      await regenerateConversation(activeConversationId, newText.trim())
+      const res = await fetchConversation(activeConversationId)
+      setMessages(res.messages || [])
+      setIsStreaming(true)
+      setStreamingText('')
+      setStreamingThought('')
+      setActiveToolCalls([])
+      setPendingPermission(null)
+      setActivePlan(null)
+      setProcessingConversationIds((prev) => new Set(prev).add(activeConversationId))
+    } catch {
+      // Falha silenciosa: histórico permanece intacto
+    }
+  }
+
   // Carregar capacidades de uma conversa (modes, tier, configOptions)
   const loadCapabilitiesForConv = useCallback(async (convId: string, fallbackModeId?: string) => {
     try {
@@ -355,13 +399,17 @@ export const App: React.FC = () => {
       if (data.conversation.cwd) {
         setSelectedCwd(data.conversation.cwd)
       }
-      // Limpa streaming e arquivos locais
-      setStreamingText('')
-      setStreamingThought('')
-      setActiveToolCalls([])
-      setPendingPermission(null)
-      setActivePlan(null)
-      setIsStreaming(false)
+      // Estado de streaming coerente: se ESTA conversa está em turno, mantém a
+      // visão ao vivo; se não, limpa resíduos da conversa anterior
+      const processing = processingConversationIds.has(id)
+      setIsStreaming(processing)
+      if (!processing) {
+        setStreamingText('')
+        setStreamingThought('')
+        setActiveToolCalls([])
+        setPendingPermission(null)
+        setActivePlan(null)
+      }
       setAttachedFiles([])
 
       // Resumir conversa no ACP se necessário
@@ -515,7 +563,7 @@ export const App: React.FC = () => {
 
       // Adiciona mensagem do usuário na tela
       const userMsg: Message = {
-        id: Date.now(),
+        id: makeTempId(),
         conversationId: convId,
         seq: messages.length + 1,
         role: 'user',
@@ -546,7 +594,7 @@ export const App: React.FC = () => {
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now(),
+          id: makeTempId(),
           conversationId: convId || '',
           seq: prev.length + 1,
           role: 'error',
@@ -680,6 +728,8 @@ export const App: React.FC = () => {
             onAddFiles={handleAddFiles}
             onRemoveFile={handleRemoveFile}
             cwd={currentCwd}
+            onRegenerate={handleRegenerate}
+            onEditMessage={handleEditMessage}
           />
         )}
       </main>
@@ -701,6 +751,7 @@ export const App: React.FC = () => {
         theme={theme}
         onToggleTheme={toggleTheme}
         initialTab={settingsTab}
+        cwd={currentCwd}
       />
 
       {/* Modal Central Rico de Permissão */}

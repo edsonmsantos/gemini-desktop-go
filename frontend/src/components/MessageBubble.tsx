@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { GeminiSparkle, FileIcon } from './icons'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -10,13 +10,59 @@ import { Message, PermissionRequest, Plan, ToolCall } from '../types'
 interface MessageBubbleProps {
   message: Message
   onRespondPermission?: (callId: string, allow: boolean) => void
+  onRegenerate?: () => void
+  onEdit?: (newText: string) => void
+  showRegenerate?: boolean
+  showEdit?: boolean
+}
+
+// friendlyError traduz mensagens técnicas do backend para linguagem comum
+function friendlyError(raw: string): { title: string; hint?: string } {
+  const m = (raw || '').toLowerCase()
+  if (m.includes('encerrou inesperadamente') || m.includes('agent exit')) {
+    return {
+      title: 'O assistente caiu inesperadamente durante a resposta.',
+      hint: 'Clique em Tentar novamente para reenviar sua mensagem.'
+    }
+  }
+  if (m.includes('timeout') || m.includes('context deadline') || m.includes('tempo expirou')) {
+    return {
+      title: 'A resposta demorou demais e o tempo expirou.',
+      hint: 'Tente novamente — se persistir, divida o pedido em partes menores.'
+    }
+  }
+  if (m.includes('connection refused') || m.includes('falha ao inicializar sessão') || m.includes('session not found')) {
+    return {
+      title: 'Não foi possível falar com o agente de IA.',
+      hint: 'Verifique se o agente (agy/gemini) está instalado. Reabra o app para tentar de novo.'
+    }
+  }
+  if (m.includes('autentic') || m.includes('unauthenticated') || m.includes('permissão negada')) {
+    return {
+      title: 'A sessão do agente precisa de autenticação.',
+      hint: 'Reabra o app para autenticar sua conta Google.'
+    }
+  }
+  if (m.includes('imagem inválida') || m.includes('arquivo de imagem inválido')) {
+    return {
+      title: 'Um dos anexos de imagem é inválido.',
+      hint: 'Tente salvar a imagem novamente e anexá-la outra vez.'
+    }
+  }
+  return { title: raw }
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
-  onRespondPermission
+  onRespondPermission,
+  onRegenerate,
+  onEdit,
+  showRegenerate,
+  showEdit
 }) => {
   const isUser = message.role === 'user'
+  const [editing, setEditing] = useState<boolean>(false)
+  const [editText, setEditText] = useState<string>(message.content)
 
   // Tratar mensagens com meta JSON
   let toolCallData: ToolCall | null = null
@@ -42,8 +88,91 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }
 
   if (isUser) {
+    if (editing) {
+      return (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            margin: '16px 0',
+            width: '100%'
+          }}
+        >
+          <div
+            style={{
+              width: '75%',
+              padding: 12,
+              borderRadius: 20,
+              backgroundColor: 'var(--bg-user-bubble)',
+              border: '1px solid var(--accent-blue)'
+            }}
+          >
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              autoFocus
+              rows={Math.min(8, editText.split('\n').length + 1)}
+              style={{
+                width: '100%',
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                resize: 'vertical',
+                color: 'var(--text-primary)',
+                fontSize: 15,
+                lineHeight: 1.5,
+                fontFamily: 'inherit'
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditText(message.content)
+                  setEditing(false)
+                }}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 14,
+                  backgroundColor: 'transparent',
+                  border: '1px solid var(--border-card)',
+                  color: 'var(--text-secondary)',
+                  fontSize: 13,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!editText.trim()}
+                onClick={() => {
+                  setEditing(false)
+                  onEdit?.(editText.trim())
+                }}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 14,
+                  backgroundColor: 'var(--accent-blue)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: editText.trim() ? 'pointer' : 'default',
+                  opacity: editText.trim() ? 1 : 0.5
+                }}
+              >
+                Salvar e reenviar
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div
+        className="msg-row"
         style={{
           display: 'flex',
           justifyContent: 'flex-end',
@@ -51,6 +180,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           width: '100%'
         }}
       >
+        {/* Botão Editar no hover (mensagem do usuário) */}
+        {showEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              setEditText(message.content)
+              setEditing(true)
+            }}
+            title="Editar e reenviar esta mensagem"
+            className="msg-action-btn"
+            style={{
+              alignSelf: 'flex-start',
+              margin: '14px 8px 0 0',
+              padding: '4px 10px',
+              borderRadius: 12,
+              backgroundColor: 'transparent',
+              border: '1px solid var(--border-card)',
+              color: 'var(--text-muted)',
+              fontSize: 12,
+              cursor: 'pointer',
+              opacity: 0
+            }}
+          >
+            ✏️ Editar
+          </button>
+        )}
         <div
           style={{
             maxWidth: '75%',
@@ -129,6 +284,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return <PlanCard plan={planData} />
   }
 
+  const isErr = message.role === 'error'
+  const errInfo = isErr ? friendlyError(message.content) : null
+
   return (
     <div
       style={{
@@ -155,7 +313,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        {message.role === 'error' ? (
+        {isErr && errInfo ? (
           <div
             style={{
               padding: '10px 14px',
@@ -163,13 +321,58 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               backgroundColor: 'rgba(234, 67, 53, 0.1)',
               border: '1px solid var(--status-failed)',
               color: 'var(--status-failed)',
-              fontSize: 14
+              fontSize: 14,
+              lineHeight: 1.5
             }}
           >
-            {message.content}
+            <div style={{ fontWeight: 500 }}>{errInfo.title}</div>
+            {errInfo.hint && (
+              <div style={{ marginTop: 4, fontSize: 13, color: 'var(--text-secondary)' }}>{errInfo.hint}</div>
+            )}
+            {onRegenerate && (
+              <button
+                type="button"
+                onClick={onRegenerate}
+                style={{
+                  marginTop: 8,
+                  padding: '5px 14px',
+                  borderRadius: 14,
+                  backgroundColor: 'var(--status-failed)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                🔁 Tentar novamente
+              </button>
+            )}
           </div>
         ) : (
           <MarkdownRenderer content={message.content} />
+        )}
+
+        {/* Ação Regenerar (última resposta do assistente) */}
+        {showRegenerate && onRegenerate && !isErr && (
+          <button
+            type="button"
+            onClick={onRegenerate}
+            title="Descartar esta resposta e gerar outra"
+            className="msg-action-btn"
+            style={{
+              marginTop: 8,
+              padding: '4px 10px',
+              borderRadius: 12,
+              backgroundColor: 'transparent',
+              border: '1px solid var(--border-card)',
+              color: 'var(--text-muted)',
+              fontSize: 12,
+              cursor: 'pointer'
+            }}
+          >
+            🔁 Regenerar
+          </button>
         )}
       </div>
     </div>

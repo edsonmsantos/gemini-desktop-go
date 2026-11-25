@@ -31,6 +31,8 @@ interface ChatViewProps {
   onAddFiles?: (files: string[]) => void
   onRemoveFile?: (index: number) => void
   cwd?: string
+  onRegenerate?: () => void
+  onEditMessage?: (newText: string) => void
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -55,8 +57,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
   files = [],
   onAddFiles,
   onRemoveFile,
-  cwd
+  cwd,
+  onRegenerate,
+  onEditMessage
 }) => {
+  // Índices das mensagens-alvo das ações: último prompt do usuário e última resposta/erro do assistente
+  let lastUserIdx = -1
+  let lastAssistantOrErrIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (lastUserIdx === -1 && messages[i].role === 'user') lastUserIdx = i
+    if (lastAssistantOrErrIdx === -1 && (messages[i].role === 'assistant' || messages[i].role === 'error')) {
+      lastAssistantOrErrIdx = i
+    }
+    if (lastUserIdx !== -1 && lastAssistantOrErrIdx !== -1) break
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Scroll automático para a última mensagem
@@ -94,11 +108,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
         {/* TodoPanel minimalista fixo no topo da área de mensagens */}
         {activePlan && <TodoPanel plan={activePlan} isStreaming={isStreaming} />}
 
-        {messages.map((msg) => (
+        {messages.map((msg, idx) => (
           <MessageBubble
             key={msg.id || `${msg.role}-${msg.seq}`}
             message={msg}
             onRespondPermission={onRespondPermission}
+            onRegenerate={!isStreaming && onRegenerate ? onRegenerate : undefined}
+            onEdit={!isStreaming && onEditMessage ? onEditMessage : undefined}
+            showRegenerate={idx === lastAssistantOrErrIdx}
+            showEdit={idx === lastUserIdx}
           />
         ))}
 

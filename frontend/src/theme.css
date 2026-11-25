@@ -149,3 +149,12 @@ textarea, input {
 .animate-spin {
   animation: spin 0.85s linear infinite;
 }
+
+/* Botões de ação de mensagem (Editar/Regenerar): aparecem no hover da bolha */
+.msg-row {
+  position: relative;
+}
+
+.msg-row:hover .msg-action-btn {
+  opacity: 1 !important;
+}

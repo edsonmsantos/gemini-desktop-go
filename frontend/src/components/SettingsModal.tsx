@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { CloseIcon, RefreshIcon, SpinnerIcon } from './icons'
-import { MCPServer } from '../types'
-import { fetchMCPServers, toggleMCPServer } from '../api'
+import { MCPServer, Skill } from '../types'
+import { fetchMCPServers, fetchSkills, toggleMCPServer } from '../api'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -10,7 +10,8 @@ interface SettingsModalProps {
   agentCmd: string
   theme: 'dark' | 'light'
   onToggleTheme: () => void
-  initialTab?: 'general' | 'mcp'
+  initialTab?: 'general' | 'mcp' | 'skills'
+  cwd?: string
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -20,9 +21,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   agentCmd,
   theme,
   onToggleTheme,
-  initialTab = 'general'
+  initialTab = 'general',
+  cwd
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'mcp'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'general' | 'mcp' | 'skills'>(initialTab)
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -58,6 +60,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       loadMCPServers()
     }
   }, [isOpen, activeTab, loadMCPServers])
+
+  // Estado da aba Skills
+  const [skills, setSkills] = useState<Skill[]>([])
+  const [skillsUserDir, setSkillsUserDir] = useState<string>('')
+  const [skillsWorkspaceDir, setSkillsWorkspaceDir] = useState<string | null>(null)
+  const [isLoadingSkills, setIsLoadingSkills] = useState<boolean>(false)
+  const [skillsError, setSkillsError] = useState<string | null>(null)
+
+  const loadSkills = useCallback(async () => {
+    setIsLoadingSkills(true)
+    setSkillsError(null)
+    try {
+      const res = await fetchSkills(cwd || undefined, true)
+      setSkills(res.skills ?? [])
+      setSkillsUserDir(res.userDir ?? '')
+      setSkillsWorkspaceDir(res.workspaceDir ?? null)
+    } catch (err: unknown) {
+      setSkillsError(err instanceof Error ? err.message : 'Falha ao consultar skills')
+    } finally {
+      setIsLoadingSkills(false)
+    }
+  }, [cwd])
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'skills') {
+      loadSkills()
+    }
+  }, [isOpen, activeTab, loadSkills])
 
   const handleToggle = async (server: MCPServer) => {
     const prevStatus = server.status
@@ -195,6 +225,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }}
               >
                 {activeCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('skills')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 14,
+              fontSize: 13,
+              fontWeight: 500,
+              backgroundColor: activeTab === 'skills' ? 'var(--bg-pill-hover)' : 'transparent',
+              color: activeTab === 'skills' ? 'var(--text-primary)' : 'var(--text-muted)',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              transition: 'background 0.15s, color 0.15s'
+            }}
+          >
+            <span>Skills</span>
+            {skills.length > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  padding: '1px 6px',
+                  borderRadius: 10,
+                  backgroundColor: 'var(--bg-pill)',
+                  color: 'var(--text-secondary)'
+                }}
+              >
+                {skills.length}
               </span>
             )}
           </button>
@@ -522,6 +585,193 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Conteúdo da Aba Skills */}
+        {activeTab === 'skills' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+            {/* Header da seção Skills: contador e botão refresh */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                {skills.length} skill{skills.length === 1 ? '' : 's'} disponíve{skills.length === 1 ? 'l' : 'is'}
+              </span>
+              <button
+                type="button"
+                onClick={loadSkills}
+                disabled={isLoadingSkills}
+                title="Atualizar lista de skills"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '5px 10px',
+                  borderRadius: 12,
+                  backgroundColor: 'var(--bg-pill)',
+                  border: '1px solid var(--border-card)',
+                  fontSize: 12,
+                  color: 'var(--text-secondary)',
+                  cursor: isLoadingSkills ? 'wait' : 'pointer'
+                }}
+              >
+                <RefreshIcon size={14} className={isLoadingSkills ? 'animate-spin' : ''} />
+                <span>Atualizar</span>
+              </button>
+            </div>
+
+            {/* Diretórios varridos */}
+            <div
+              style={{
+                padding: '8px 12px',
+                borderRadius: 8,
+                backgroundColor: 'var(--bg-sidebar)',
+                border: '1px solid var(--border-subtle)',
+                fontSize: 11,
+                color: 'var(--text-muted)',
+                lineHeight: 1.6,
+                fontFamily: 'var(--font-mono)'
+              }}
+            >
+              <div title={skillsUserDir}>global: {skillsUserDir || '~/.agents/skills'}</div>
+              <div title={skillsWorkspaceDir || undefined}>
+                workspace: {skillsWorkspaceDir || (cwd ? `${cwd}/.agents/skills` : '— (sem workspace ativo)')}
+              </div>
+            </div>
+
+            {/* Carregando */}
+            {isLoadingSkills && skills.length === 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: '30px 16px',
+                  fontSize: 13,
+                  color: 'var(--text-muted)'
+                }}
+              >
+                <SpinnerIcon size={16} /> Carregando skills...
+              </div>
+            )}
+
+            {/* Erro geral na consulta */}
+            {skillsError && !isLoadingSkills && (
+              <div
+                style={{
+                  padding: '16px',
+                  borderRadius: 8,
+                  backgroundColor: 'rgba(234, 67, 53, 0.1)',
+                  color: 'var(--status-failed)',
+                  fontSize: 13,
+                  textAlign: 'center'
+                }}
+              >
+                {skillsError}
+              </div>
+            )}
+
+            {/* Estado vazio com instruções */}
+            {!isLoadingSkills && !skillsError && skills.length === 0 && (
+              <div
+                style={{
+                  padding: '24px 16px',
+                  textAlign: 'center',
+                  color: 'var(--text-muted)',
+                  fontSize: 13,
+                  backgroundColor: 'var(--bg-sidebar)',
+                  borderRadius: 10,
+                  border: '1px solid var(--border-subtle)',
+                  lineHeight: 1.6
+                }}
+              >
+                Nenhuma skill encontrada.
+                <br />
+                <span style={{ fontSize: 12 }}>
+                  Crie <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>~/.agents/skills/&lt;slug&gt;/SKILL.md</code> com
+                  frontmatter <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>name</code> e{' '}
+                  <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>description</code>.
+                </span>
+              </div>
+            )}
+
+            {/* Lista de skills */}
+            {skills.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  overflowY: 'auto',
+                  maxHeight: 320,
+                  paddingRight: 4
+                }}
+              >
+                {skills.map((skill) => (
+                  <div
+                    key={skill.slug}
+                    title={skill.path}
+                    style={{
+                      padding: '10px 12px',
+                      backgroundColor: 'var(--bg-sidebar)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 10
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>{skill.name}</span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontFamily: 'var(--font-mono)',
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          backgroundColor: 'var(--bg-pill)',
+                          color: 'var(--text-muted)'
+                        }}
+                      >
+                        /{skill.slug}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          textTransform: 'uppercase',
+                          fontWeight: 600,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          backgroundColor: 'var(--bg-pill)',
+                          color: skill.scope === 'workspace' ? 'var(--accent-blue)' : 'var(--text-muted)'
+                        }}
+                      >
+                        {skill.scope === 'workspace' ? 'workspace' : 'global'}
+                      </span>
+                    </div>
+                    {skill.description && (
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 12,
+                          color: 'var(--text-secondary)',
+                          lineHeight: 1.4,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        {skill.description}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Dica de uso na conversa */}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, padding: '0 2px' }}>
+              💡 Em uma conversa, digite <code style={{ fontFamily: 'var(--font-mono)' }}>/</code> ou{' '}
+              <code style={{ fontFamily: 'var(--font-mono)' }}>$</code> no campo de prompt para inserir uma skill.
+            </div>
           </div>
         )}
 

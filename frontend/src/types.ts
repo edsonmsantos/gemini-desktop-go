@@ -44,7 +44,7 @@ export interface Conversation {
 }
 
 export interface Message {
-  id: number
+  id: number | string // number do backend; string em mensagens otimistas (makeTempId)
   conversationId: string
   seq: number
   role: 'user' | 'assistant' | 'thought' | 'tool_call' | 'plan' | 'permission' | 'error'
