@@ -1,16 +1,26 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { GeminiSparkle, FileIcon } from './icons'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallCard } from './ToolCallCard'
 import { PermissionCard } from './PermissionCard'
 import { PlanCard } from './PlanCard'
-import { Message, PermissionRequest, Plan, ToolCall } from '../types'
-import { exportResponsePdf, openExternalURL } from '../api'
+import { Message, PermissionRequest, Plan, SourceResolution, ToolCall } from '../types'
+import { exportResponsePdf, openExternalURL, resolveSources } from '../api'
 
 interface SourceLink {
   text: string
   url: string
+}
+
+function formatShortSource(urlStr: string): string {
+  try {
+    const u = new URL(urlStr)
+    const path = u.pathname.length > 30 ? u.pathname.slice(0, 30) + '…' : u.pathname
+    return u.hostname + (path === '/' ? '' : path)
+  } catch {
+    return urlStr
+  }
 }
 
 // extractSources coleta links da resposta: markdown [texto](url) e URLs soltas
@@ -45,6 +55,7 @@ interface MessageBubbleProps {
   showRegenerate?: boolean
   showEdit?: boolean
   conversationTitle?: string
+  redirectUrls?: string[]
 }
 
 // friendlyError traduz mensagens técnicas do backend para linguagem comum
@@ -90,7 +101,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onEdit,
   showRegenerate,
   showEdit,
-  conversationTitle
+  conversationTitle,
+  redirectUrls
 }) => {
   const isUser = message.role === 'user'
   const [editing, setEditing] = useState<boolean>(false)
@@ -99,9 +111,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [savingPdf, setSavingPdf] = useState<boolean>(false)
   const [savedPath, setSavedPath] = useState<string | null>(null)
   const [showSources, setShowSources] = useState<boolean>(false)
+  const [resolvedSources, setResolvedSources] = useState<SourceResolution[] | null>(null)
+  const [isResolving, setIsResolving] = useState<boolean>(false)
 
   const isAssistant = message.role === 'assistant'
   const sources = isAssistant ? extractSources(message.content) : []
+  const hasRedirects = Boolean(isAssistant && redirectUrls && redirectUrls.length > 0)
+  const totalSourcesCount = sources.length + (redirectUrls?.length ?? 0)
+
+  useEffect(() => {
+    if (showSources && hasRedirects && redirectUrls && resolvedSources === null && !isResolving) {
+      setIsResolving(true)
+      resolveSources(redirectUrls)
+        .then((res) => {
+          setResolvedSources(res)
+        })
+        .catch(() => {
+          setResolvedSources([])
+        })
+        .finally(() => {
+          setIsResolving(false)
+        })
+    }
+  }, [showSources, hasRedirects, redirectUrls, resolvedSources, isResolving])
 
   const handleCopy = async () => {
     // Clipboard async pode ficar PENDENTE (permissão do navegador) e nunca
@@ -469,10 +501,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 title="Salvar esta resposta como PDF"
                 disabled={savingPdf}
               />
-              {sources.length > 0 && (
+              {(sources.length > 0 || hasRedirects) && (
                 <ActionButton
                   onClick={() => setShowSources((prev) => !prev)}
-                  label={showSources ? '▲ Fontes' : `🔗 Fontes (${sources.length})`}
+                  label={showSources ? '▲ Fontes' : `🔗 Fontes (${totalSourcesCount})`}
                 />
               )}
               {showRegenerate && onRegenerate && (
@@ -484,7 +516,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 ✓ PDF salvo em {savedPath}
               </div>
             )}
-            {showSources && sources.length > 0 && (
+            {showSources && (sources.length > 0 || hasRedirects) && (
               <div
                 className="selectable"
                 style={{
@@ -495,40 +527,112 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   border: '1px solid var(--border-subtle)'
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 11,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                    fontWeight: 600,
-                    marginBottom: 6
-                  }}
-                >
-                  Fontes mencionadas na resposta
-                </div>
-                {sources.map((s, i) => (
-                  <div key={s.url} style={{ display: 'flex', gap: 8, padding: '4px 0', fontSize: 13 }}>
-                    <span style={{ color: 'var(--text-muted)', flexShrink: 0, minWidth: 16 }}>{i + 1}.</span>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSource(s.url)}
-                      title={s.url}
+                {sources.length > 0 && (
+                  <>
+                    <div
                       style={{
-                        background: 'none',
-                        border: 'none',
-                        padding: 0,
-                        color: 'var(--accent-blue)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        fontSize: 13,
-                        lineHeight: 1.4,
-                        wordBreak: 'break-word'
+                        fontSize: 11,
+                        textTransform: 'uppercase',
+                        color: 'var(--text-muted)',
+                        fontWeight: 600,
+                        marginBottom: 6
                       }}
                     >
-                      {s.text} ↗
-                    </button>
+                      Fontes mencionadas na resposta
+                    </div>
+                    {sources.map((s, i) => (
+                      <div key={s.url} style={{ display: 'flex', gap: 8, padding: '4px 0', fontSize: 13 }}>
+                        <span style={{ color: 'var(--text-muted)', flexShrink: 0, minWidth: 16 }}>{i + 1}.</span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSource(s.url)}
+                          title={s.url}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            color: 'var(--accent-blue)',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            fontSize: 13,
+                            lineHeight: 1.4,
+                            wordBreak: 'break-word'
+                          }}
+                        >
+                          {s.text} ↗
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {hasRedirects && (
+                  <div
+                    style={{
+                      marginTop: sources.length > 0 ? 12 : 0,
+                      paddingTop: sources.length > 0 ? 8 : 0,
+                      borderTop: sources.length > 0 ? '1px solid var(--border-subtle)' : 'none'
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        textTransform: 'uppercase',
+                        color: 'var(--text-muted)',
+                        fontWeight: 600,
+                        marginBottom: 6
+                      }}
+                    >
+                      Fontes da pesquisa (agente)
+                    </div>
+                    {isResolving && (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 0' }}>
+                        Resolvendo fontes da pesquisa…
+                      </div>
+                    )}
+                    {resolvedSources && (
+                      <>
+                        {resolvedSources
+                          .filter((s) => s.status > 0)
+                          .map((s, i) => (
+                            <div key={`resolved-${s.to}-${i}`} style={{ display: 'flex', gap: 8, padding: '4px 0', fontSize: 13 }}>
+                              <span style={{ color: 'var(--text-muted)', flexShrink: 0, minWidth: 16 }}>{i + 1}.</span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenSource(s.to)}
+                                title={s.to}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: 0,
+                                  color: 'var(--accent-blue)',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  fontSize: 13,
+                                  lineHeight: 1.4,
+                                  wordBreak: 'break-word'
+                                }}
+                              >
+                                {formatShortSource(s.to)} ↗
+                              </button>
+                            </div>
+                          ))}
+                        {resolvedSources.filter((s) => s.status === 0).length > 0 && (
+                          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                            <div style={{ fontWeight: 500, marginBottom: 4 }}>Não resolvidas:</div>
+                            {resolvedSources
+                              .filter((s) => s.status === 0)
+                              .map((s, i) => (
+                                <div key={`unresolved-${s.from}-${i}`} style={{ padding: '2px 0', wordBreak: 'break-word' }}>
+                                  {s.from}
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </>
