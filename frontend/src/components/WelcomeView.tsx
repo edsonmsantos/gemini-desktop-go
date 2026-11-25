@@ -17,6 +17,7 @@ interface WelcomeViewProps {
   files?: string[]
   onAddFiles?: (files: string[]) => void
   onRemoveFile?: (index: number) => void
+  cwd?: string
 }
 
 export const WelcomeView: React.FC<WelcomeViewProps> = ({
@@ -33,7 +34,8 @@ export const WelcomeView: React.FC<WelcomeViewProps> = ({
   onCancel,
   files = [],
   onAddFiles,
-  onRemoveFile
+  onRemoveFile,
+  cwd
 }) => {
   return (
     <div
@@ -104,6 +106,7 @@ export const WelcomeView: React.FC<WelcomeViewProps> = ({
             files={files}
             onAddFiles={onAddFiles}
             onRemoveFile={onRemoveFile}
+            cwd={cwd}
           />
         </div>
       </div>

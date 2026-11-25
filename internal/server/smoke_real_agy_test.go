@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -177,5 +179,55 @@ func TestSmoke_RealAgy(t *testing.T) {
 	resp.Body.Close()
 	if caps3.Modes.CurrentModeID != "default" {
 		t.Fatalf("esperava currentModeId default, obteve %s", caps3.Modes.CurrentModeID)
+	}
+
+	// 7. GET /api/skills com cwd contendo .agents/skills/demo-ping/SKILL.md
+	demoSkillDir := filepath.Join(tmpDir, ".agents", "skills", "demo-ping")
+	if err := os.MkdirAll(demoSkillDir, 0755); err != nil {
+		t.Fatalf("falha ao criar demo-ping dir: %v", err)
+	}
+	demoSkillMD := `---
+name: Demo Ping
+description: Skill de teste smoke real
+---
+# Conteudo demo
+`
+	if err := os.WriteFile(filepath.Join(demoSkillDir, "SKILL.md"), []byte(demoSkillMD), 0644); err != nil {
+		t.Fatalf("falha ao criar demo-ping SKILL.md: %v", err)
+	}
+
+	skillsURL := ts.URL + "/api/skills?cwd=" + url.QueryEscape(tmpDir)
+	resp, err = http.Get(skillsURL)
+	if err != nil {
+		t.Fatalf("falha ao consultar /api/skills: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("esperava 200 em /api/skills, obteve %d", resp.StatusCode)
+	}
+	var skillsResp struct {
+		Skills []struct {
+			Slug        string `json:"slug"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Scope       string `json:"scope"`
+		} `json:"skills"`
+		UserDir      string  `json:"userDir"`
+		WorkspaceDir *string `json:"workspaceDir"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&skillsResp)
+	resp.Body.Close()
+
+	foundDemoPing := false
+	for _, sk := range skillsResp.Skills {
+		if sk.Slug == "demo-ping" {
+			foundDemoPing = true
+			if sk.Name != "Demo Ping" || sk.Scope != "workspace" {
+				t.Fatalf("demo-ping com dados incorretos: %+v", sk)
+			}
+			break
+		}
+	}
+	if !foundDemoPing {
+		t.Fatalf("esperava encontrar demo-ping nas skills retornadas: %+v", skillsResp.Skills)
 	}
 }

@@ -31,6 +31,7 @@ interface ChatViewProps {
   files?: string[]
   onAddFiles?: (files: string[]) => void
   onRemoveFile?: (index: number) => void
+  cwd?: string
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -54,7 +55,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onSelectMode,
   files = [],
   onAddFiles,
-  onRemoveFile
+  onRemoveFile,
+  cwd
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -179,6 +181,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             files={files}
             onAddFiles={onAddFiles}
             onRemoveFile={onRemoveFile}
+            cwd={cwd}
           />
         </div>
       </div>

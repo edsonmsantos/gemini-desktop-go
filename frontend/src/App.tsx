@@ -570,6 +570,8 @@ export const App: React.FC = () => {
   }
 
   const isWelcome = !activeConversationId && messages.length === 0
+  const activeConversation = conversations.find((c) => c.id === activeConversationId)
+  const currentCwd = activeConversation?.cwd || selectedCwd || ''
 
   return (
     <div
@@ -618,6 +620,7 @@ export const App: React.FC = () => {
             files={attachedFiles}
             onAddFiles={handleAddFiles}
             onRemoveFile={handleRemoveFile}
+            cwd={currentCwd}
           />
         ) : (
           <ChatView
@@ -642,6 +645,7 @@ export const App: React.FC = () => {
             files={attachedFiles}
             onAddFiles={handleAddFiles}
             onRemoveFile={handleRemoveFile}
+            cwd={currentCwd}
           />
         )}
       </main>

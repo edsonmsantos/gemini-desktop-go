@@ -83,6 +83,20 @@ export interface TierInfo {
   upgradeUri?: string
 }
 
+export interface Skill {
+  slug: string
+  name: string
+  description: string
+  scope: 'user' | 'workspace'
+  path: string
+}
+
+export interface SkillsResponse {
+  skills: Skill[]
+  userDir: string
+  workspaceDir: string | null
+}
+
 export interface ConfigOption {
   id: string
   name: string

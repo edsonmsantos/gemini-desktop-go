@@ -1,4 +1,4 @@
-import { AgentInfo, CapabilitiesResponse, Conversation, Message, Model, Workspace, WSEvent } from './types'
+import { AgentInfo, CapabilitiesResponse, Conversation, Message, Model, SkillsResponse, Workspace, WSEvent } from './types'
 
 declare global {
   interface Window {
@@ -299,3 +299,21 @@ export class WSManager {
 }
 
 export const wsManager = new WSManager()
+
+const skillsClientCache = new Map<string, { data: SkillsResponse; timestamp: number }>()
+
+export async function fetchSkills(cwd?: string): Promise<SkillsResponse> {
+  const key = cwd || ''
+  const cached = skillsClientCache.get(key)
+  if (cached && Date.now() - cached.timestamp < 30000) {
+    return cached.data
+  }
+  const url = cwd ? `${getBaseURL()}/api/skills?cwd=${encodeURIComponent(cwd)}` : `${getBaseURL()}/api/skills`
+  const res = await fetch(url)
+  if (!res.ok) {
+    throw new Error('Falha ao carregar skills')
+  }
+  const data = (await res.json()) as SkillsResponse
+  skillsClientCache.set(key, { data, timestamp: Date.now() })
+  return data
+}

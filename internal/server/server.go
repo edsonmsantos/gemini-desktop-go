@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"geminidesktop-go/internal/acp"
+	"geminidesktop-go/internal/skills"
 	"geminidesktop-go/internal/store"
 
 	"github.com/google/uuid"
@@ -81,6 +82,15 @@ type Server struct {
 
 	clientsMu sync.Mutex
 	wsClients map[*websocket.Conn]bool
+
+	skillsMu      sync.Mutex
+	skillsCache   map[string]skillsCacheEntry
+	userSkillsDir string
+}
+
+type skillsCacheEntry struct {
+	skills    []skills.Skill
+	expiresAt time.Time
 }
 
 // NewServer inicializa o servidor preservando compatibilidade legada
@@ -104,6 +114,7 @@ func NewServerV2(client *acp.Client, defaultCwd string, staticFS fs.FS, st *stor
 		sessConvs:      make(map[string]string),
 		orphanSessions: make(map[string]bool),
 		wsClients:      make(map[*websocket.Conn]bool),
+		skillsCache:    make(map[string]skillsCacheEntry),
 	}
 
 	if s.client != nil {
@@ -132,6 +143,20 @@ func (s *Server) getTempWorkspacesDir() string {
 		return s.tempWorkspacesDir
 	}
 	return filepath.Join(os.TempDir(), "geminidesktop")
+}
+
+// SetUserSkillsDir define o diretório raiz das skills de usuário (global)
+func (s *Server) SetUserSkillsDir(dir string) {
+	s.skillsMu.Lock()
+	defer s.skillsMu.Unlock()
+	s.userSkillsDir = dir
+}
+
+// ClearSkillsCache invalida o cache em memória das skills
+func (s *Server) ClearSkillsCache() {
+	s.skillsMu.Lock()
+	defer s.skillsMu.Unlock()
+	s.skillsCache = make(map[string]skillsCacheEntry)
 }
 
 func isImageFile(path string, size int64) bool {
@@ -297,6 +322,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/stream", s.handleStream)
 	s.mux.HandleFunc("GET /api/models", s.handleModels)
 	s.mux.HandleFunc("GET /api/workspaces", s.handleWorkspaces)
+	s.mux.HandleFunc("GET /api/skills", s.handleSkills)
 
 	// Endpoints v2 de conversas
 	s.mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)
@@ -396,6 +422,78 @@ func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(wsList)
+}
+
+// SkillsResponse formato de resposta de GET /api/skills
+type SkillsResponse struct {
+	Skills       []skills.Skill `json:"skills"`
+	UserDir      string         `json:"userDir"`
+	WorkspaceDir *string        `json:"workspaceDir"`
+}
+
+// GET /api/skills?cwd=<path>
+func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
+	s.skillsMu.Lock()
+	userDir := s.userSkillsDir
+	s.skillsMu.Unlock()
+
+	if userDir == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			userDir = filepath.Join(home, ".agents", "skills")
+		}
+	}
+
+	var workspaceDir *string
+	var wsDirToScan string
+	cwd := strings.TrimSpace(r.URL.Query().Get("cwd"))
+	if cwd != "" {
+		info, err := os.Stat(cwd)
+		if err == nil && info.IsDir() {
+			wsSkills := filepath.Join(cwd, ".agents", "skills")
+			workspaceDir = &wsSkills
+			wsDirToScan = wsSkills
+		}
+	}
+
+	cacheKey := userDir + "|" + wsDirToScan
+
+	s.skillsMu.Lock()
+	if entry, found := s.skillsCache[cacheKey]; found && time.Now().Before(entry.expiresAt) {
+		skillsCopy := entry.skills
+		s.skillsMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(SkillsResponse{
+			Skills:       skillsCopy,
+			UserDir:      userDir,
+			WorkspaceDir: workspaceDir,
+		})
+		return
+	}
+	s.skillsMu.Unlock()
+
+	scanner := skills.Scanner{
+		UserDir:      userDir,
+		WorkspaceDir: wsDirToScan,
+	}
+	list, _ := scanner.Scan()
+	if list == nil {
+		list = []skills.Skill{}
+	}
+
+	s.skillsMu.Lock()
+	s.skillsCache[cacheKey] = skillsCacheEntry{
+		skills:    list,
+		expiresAt: time.Now().Add(30 * time.Second),
+	}
+	s.skillsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(SkillsResponse{
+		Skills:       list,
+		UserDir:      userDir,
+		WorkspaceDir: workspaceDir,
+	})
 }
 
 // POST /api/conversations {cwd, modelId?, modeId?}
