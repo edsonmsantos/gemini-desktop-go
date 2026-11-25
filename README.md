@@ -10,6 +10,7 @@ Um cliente desktop nativo (Go + React/Wails) no estilo do Gemini, que conversa c
 - 📎 **Anexos multimodais**: cole arquivos do gerenciador, **cole screenshots com Ctrl+V**, **arraste arquivos** para a conversa ou use o seletor nativo — imagens vão como base64, demais arquivos por caminho
 - ✏️ **Editar e Regenerar**: corrija a última mensagem ou gere outra resposta com um clique
 - 📋 **Copiar, 📄 Salvar como PDF e 🔗 Fontes**: ações em cada resposta — PDF gerado no backend cai em `~/Downloads/Gemini Desktop/`; fontes (links citados) abrem no navegador padrão com um clique
+- 📁 **Artefatos**: pill no topo do chat lista arquivos criados/modificados pelo agente na conversa (varredura do workspace por data de modificação); clique abre no app padrão do sistema
 - 🔔 **Notificações nativas** quando o agente termina a resposta (`notify-send`; desabilite com `"notifications": false` no config.json)
 - 🩹 **Erros em linguagem humana** com botão "Tentar novamente" — sem mensagens técnicas
 - 🗂️ **Workspaces**: pastas recentes, escolha manual, seletor nativo ou **pasta temporária automática** por conversa
@@ -123,7 +124,8 @@ Para usar o Gemini CLI oficial:
      | `POST` | `/api/conversations/{id}/regenerate` | Descarta o último turno e reenvia o último prompt (`text` opcional para edição) |
      | `POST` | `/api/attachments` | Salva anexo enviado em base64 (print colado/drag & drop) e retorna o caminho |
      | `POST` | `/api/export/pdf` | Exporta uma resposta markdown como PDF em `~/Downloads/Gemini Desktop/` |
-     | `POST` | `/api/open-url` | Abre URL http/https no navegador padrão (links de fontes) |
+     | `POST` | `/api/open-url` | Abre URL http/https **ou caminho de arquivo** no app padrão do sistema |
+     | `GET` | `/api/conversations/{id}/artifacts` | Lista arquivos criados/modificados no workspace desde a criação da conversa |
      | `POST` | `/api/conversations/{id}/resume` | Retoma sessão anterior via `session/load` do ACP |
      | `GET` | `/api/models` | Lista modelos disponíveis anunciados pelo agente ACP |
      | `GET` | `/api/workspaces` | Lista diretórios de trabalho recentes registrados |
