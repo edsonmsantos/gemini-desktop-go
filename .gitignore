@@ -16,3 +16,4 @@ testdata/fake-acp-agent/fake-agent
 
 # OS
 .DS_Store
+frontend/tsconfig.tsbuildinfo
