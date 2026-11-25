@@ -392,6 +392,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/conversations/{id}/artifacts", s.handleArtifacts)
 	s.mux.HandleFunc("POST /api/export/pdf", s.handleExportPDF)
 	s.mux.HandleFunc("POST /api/open-url", s.handleOpenURL)
+	s.mux.HandleFunc("POST /api/files/content", s.handleFileContent)
 
 	// Endpoints v2 de conversas
 	s.mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)

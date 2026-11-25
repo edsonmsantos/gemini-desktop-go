@@ -5,6 +5,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallCard } from './ToolCallCard'
 import { TodoPanel } from './TodoPanel'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { ArtifactViewerModal } from './ArtifactViewerModal'
 import { fetchArtifacts, openExternalURL } from '../api'
 import { GeminiSparkle, RefreshIcon } from './icons'
 import { Artifact, Message, Model, ModesInfo, PermissionRequest, Plan, ToolCall } from '../types'
@@ -147,8 +148,30 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return '📄'
   }
 
+  const PREVIEWABLE_EXTS = new Set([
+    'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg',
+    'md', 'txt', 'log', 'json', 'xml', 'yaml', 'yml', 'toml',
+    'py', 'js', 'ts', 'go', 'rs', 'java', 'c', 'cpp', 'h',
+    'sh', 'html', 'css', 'sql', 'csv', 'ini', 'conf'
+  ])
+
+  const isPreviewable = (name: string): boolean => {
+    const ext = name.split('.').pop()?.toLowerCase() || ''
+    return PREVIEWABLE_EXTS.has(ext)
+  }
+
+  const [viewerArtifact, setViewerArtifact] = useState<Artifact | null>(null)
+
   const handleOpenArtifact = (path: string) => {
     void openExternalURL(path)
+  }
+
+  const handleArtifactItemClick = (artifact: Artifact) => {
+    if (isPreviewable(artifact.name)) {
+      setViewerArtifact(artifact)
+    } else {
+      handleOpenArtifact(artifact.path)
+    }
   }
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -257,9 +280,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   <button
                     key={a.path}
                     type="button"
-                    onClick={() => handleOpenArtifact(a.path)}
+                    onClick={() => handleArtifactItemClick(a)}
                     title={`${a.path}
-Clique para abrir no app padrão`}
+${isPreviewable(a.name) ? 'Clique para visualizar no app' : 'Clique para abrir no app padrão'}`}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -403,6 +426,13 @@ Clique para abrir no app padrão`}
           />
         </div>
       </div>
+
+      {viewerArtifact && (
+        <ArtifactViewerModal
+          artifact={viewerArtifact}
+          onClose={() => setViewerArtifact(null)}
+        />
+      )}
     </div>
   )
 }
