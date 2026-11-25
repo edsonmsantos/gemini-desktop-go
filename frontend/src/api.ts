@@ -1,4 +1,4 @@
-import { AgentInfo, CapabilitiesResponse, Conversation, Message, Model, SkillsResponse, Workspace, WSEvent } from './types'
+import { AgentInfo, CapabilitiesResponse, Conversation, MCPResponse, MCPServer, Message, Model, SkillsResponse, Workspace, WSEvent } from './types'
 
 declare global {
   interface Window {
@@ -316,4 +316,28 @@ export async function fetchSkills(cwd?: string): Promise<SkillsResponse> {
   const data = (await res.json()) as SkillsResponse
   skillsClientCache.set(key, { data, timestamp: Date.now() })
   return data
+}
+
+export async function fetchMCPServers(): Promise<MCPResponse> {
+  const res = await fetch(`${getBaseURL()}/api/mcp`)
+  if (res.status === 503) {
+    return { servers: [], available: false }
+  }
+  if (!res.ok) {
+    throw new Error('Falha ao carregar servidores MCP')
+  }
+  return res.json()
+}
+
+export async function toggleMCPServer(name: string, enable: boolean): Promise<{ name: string; status: string; server?: MCPServer }> {
+  const res = await fetch(`${getBaseURL()}/api/mcp/${encodeURIComponent(name)}/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enable })
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(err || 'Falha ao alterar estado do servidor MCP')
+  }
+  return res.json()
 }

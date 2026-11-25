@@ -97,6 +97,18 @@ export interface SkillsResponse {
   workspaceDir: string | null
 }
 
+export interface MCPServer {
+  name: string
+  type: string
+  status: 'enabled' | 'disabled' | 'other'
+  command: string
+}
+
+export interface MCPResponse {
+  servers: MCPServer[]
+  available: boolean
+}
+
 export interface ConfigOption {
   id: string
   name: string

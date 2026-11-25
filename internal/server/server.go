@@ -16,11 +16,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"geminidesktop-go/internal/acp"
+	"geminidesktop-go/internal/mcp"
 	"geminidesktop-go/internal/skills"
 	"geminidesktop-go/internal/store"
 
@@ -86,6 +88,16 @@ type Server struct {
 	skillsMu      sync.Mutex
 	skillsCache   map[string]skillsCacheEntry
 	userSkillsDir string
+
+	mcpClient *mcp.Client
+	mcpMu     sync.Mutex
+	mcpCache  mcpCacheEntry
+}
+
+type mcpCacheEntry struct {
+	servers   []mcp.Server
+	available bool
+	expiresAt time.Time
 }
 
 type skillsCacheEntry struct {
@@ -115,6 +127,7 @@ func NewServerV2(client *acp.Client, defaultCwd string, staticFS fs.FS, st *stor
 		orphanSessions: make(map[string]bool),
 		wsClients:      make(map[*websocket.Conn]bool),
 		skillsCache:    make(map[string]skillsCacheEntry),
+		mcpClient:      mcp.NewClient("agy"),
 	}
 
 	if s.client != nil {
@@ -157,6 +170,14 @@ func (s *Server) ClearSkillsCache() {
 	s.skillsMu.Lock()
 	defer s.skillsMu.Unlock()
 	s.skillsCache = make(map[string]skillsCacheEntry)
+}
+
+// SetMCPClient injeta um cliente customizado de MCP (usado em testes)
+func (s *Server) SetMCPClient(client *mcp.Client) {
+	s.mcpMu.Lock()
+	defer s.mcpMu.Unlock()
+	s.mcpClient = client
+	s.mcpCache = mcpCacheEntry{}
 }
 
 func isImageFile(path string, size int64) bool {
@@ -323,6 +344,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/models", s.handleModels)
 	s.mux.HandleFunc("GET /api/workspaces", s.handleWorkspaces)
 	s.mux.HandleFunc("GET /api/skills", s.handleSkills)
+	s.mux.HandleFunc("GET /api/mcp", s.handleListMCP)
+	s.mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
 
 	// Endpoints v2 de conversas
 	s.mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)
@@ -494,6 +517,132 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 		UserDir:      userDir,
 		WorkspaceDir: workspaceDir,
 	})
+}
+
+var mcpNameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+// GET /api/mcp
+func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
+	s.mcpMu.Lock()
+	if time.Now().Before(s.mcpCache.expiresAt) {
+		servers := s.mcpCache.servers
+		avail := s.mcpCache.available
+		s.mcpMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"servers":   servers,
+			"available": avail,
+		})
+		return
+	}
+	client := s.mcpClient
+	if client == nil {
+		client = mcp.NewClient("agy")
+		s.mcpClient = client
+	}
+	s.mcpMu.Unlock()
+
+	list, err := client.List(r.Context())
+	available := true
+	if err != nil {
+		if errors.Is(err, mcp.ErrMCPUnavailable) {
+			available = false
+			list = []mcp.Server{}
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if list == nil {
+		list = []mcp.Server{}
+	}
+
+	s.mcpMu.Lock()
+	s.mcpCache = mcpCacheEntry{
+		servers:   list,
+		available: available,
+		expiresAt: time.Now().Add(5 * time.Second),
+	}
+	s.mcpMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"servers":   list,
+		"available": available,
+	})
+}
+
+// POST /api/mcp/{name}/toggle
+func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !mcpNameRegex.MatchString(name) {
+		http.Error(w, "invalid server name", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Enable bool `json:"enable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	s.mcpMu.Lock()
+	client := s.mcpClient
+	if client == nil {
+		client = mcp.NewClient("agy")
+		s.mcpClient = client
+	}
+	s.mcpMu.Unlock()
+
+	var err error
+	if req.Enable {
+		err = client.Enable(r.Context(), name)
+	} else {
+		err = client.Disable(r.Context(), name)
+	}
+
+	if err != nil {
+		if errors.Is(err, mcp.ErrMCPUnavailable) {
+			http.Error(w, "agy CLI indisponível", http.StatusServiceUnavailable)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Invalida cache de listagem
+	s.mcpMu.Lock()
+	s.mcpCache = mcpCacheEntry{}
+	s.mcpMu.Unlock()
+
+	// Re-lista para retornar o status atualizado
+	updatedList, err := client.List(r.Context())
+	var updatedServer *mcp.Server
+	status := "disabled"
+	if req.Enable {
+		status = "enabled"
+	}
+	if err == nil {
+		for _, srv := range updatedList {
+			if srv.Name == name {
+				updatedServer = &srv
+				status = srv.Status
+				break
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	resp := map[string]interface{}{
+		"name":   name,
+		"status": status,
+	}
+	if updatedServer != nil {
+		resp["server"] = updatedServer
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // POST /api/conversations {cwd, modelId?, modeId?}
