@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react'
+import React, { useRef, useEffect, useState } from 'react'
 import { MessageBubble } from './MessageBubble'
 import { PromptBar } from './PromptBar'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -34,6 +34,24 @@ interface ChatViewProps {
   onRegenerate?: () => void
   onEditMessage?: (newText: string) => void
   conversationTitle?: string
+}
+
+// WorkingIndicator: mostra que o agente está trabalhando enquanto nenhum
+// conteúdo visível chegou (igual ao "Working 5s" do ZCode)
+const WorkingIndicator: React.FC = () => {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const label = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '18px 0 6px 0' }}>
+      <GeminiSparkle size={16} className="animate-spin" color="var(--accent-blue)" />
+      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>Trabalhando</span>
+      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
+    </div>
+  )
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -122,6 +140,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
             conversationTitle={conversationTitle}
           />
         ))}
+
+        {/* Indicador de trabalho: enquanto o agente não produziu nada visível */}
+        {isStreaming && !streamingText && !streamingThought && activeToolCalls.length === 0 && !activePlan && (
+          <WorkingIndicator />
+        )}
 
         {/* Blocos em tempo real durante streaming */}
         {streamingThought && (
