@@ -247,4 +247,3 @@ func TestPrompts_CurlCycle(t *testing.T) {
 		t.Fatalf("esperava lista vazia após delete no curl, out: %s", string(out))
 	}
 }
-

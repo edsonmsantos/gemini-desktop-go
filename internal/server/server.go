@@ -96,6 +96,7 @@ type Server struct {
 
 	agentBinary string
 	port        int
+	turnTimeout time.Duration
 
 	mcpClient *mcp.Client
 	mcpMu     sync.Mutex
@@ -136,6 +137,7 @@ func NewServerV2(client *acp.Client, defaultCwd string, staticFS fs.FS, st *stor
 		wsClients:      make(map[*websocket.Conn]bool),
 		skillsCache:    make(map[string]skillsCacheEntry),
 		port:           8399,
+		turnTimeout:    900 * time.Second,
 		mcpClient:      mcp.NewClient("agy"),
 	}
 
@@ -190,6 +192,13 @@ func (s *Server) SetAgentBinary(binary string) {
 // SetPort define a porta do servidor HTTP
 func (s *Server) SetPort(port int) {
 	s.port = port
+}
+
+// SetTurnTimeout define a duração máxima permitida para um turno (0 = sem limite)
+func (s *Server) SetTurnTimeout(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.turnTimeout = d
 }
 
 // SetUserSkillsDir define o diretório raiz das skills de usuário (global)
@@ -1235,7 +1244,7 @@ func (s *Server) startTurn(id, sessID string, contentBlocks []interface{}, event
 				}
 			case "tool_call":
 				if ev.ToolCall != nil && persist {
-					_, _ = s.store.UpsertToolCallMessage(id, ev.ToolCall.ID, string(ev.ToolCall.Status), ev.ToolCall.Title, ev.ToolCall.Kind, ev.ToolCall.RawInput)
+					_, _ = s.store.UpsertToolCallMessage(id, ev.ToolCall.ID, string(ev.ToolCall.Status), ev.ToolCall.Title, ev.ToolCall.Kind, ev.ToolCall.Name, ev.ToolCall.RawInput, ev.ToolCall.RawOutput)
 				}
 			case "plan":
 				if ev.Plan != nil {
@@ -1287,10 +1296,20 @@ func (s *Server) startTurn(id, sessID string, contentBlocks []interface{}, event
 		}
 	}()
 
+	s.mu.Lock()
+	turnTimeout := s.turnTimeout
+	s.mu.Unlock()
+
 	// Dispara o turno de forma assíncrona
 	go func() {
 		defer close(eventCh)
-		ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+		var ctx context.Context
+		var cancel context.CancelFunc
+		if turnTimeout > 0 {
+			ctx, cancel = context.WithTimeout(context.Background(), turnTimeout)
+		} else {
+			ctx, cancel = context.WithCancel(context.Background())
+		}
 		defer cancel()
 
 		if err := s.client.PromptSessionWithContent(ctx, sessID, contentBlocks, eventCh); err != nil {

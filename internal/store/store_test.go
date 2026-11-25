@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -94,11 +95,11 @@ func TestStore_MigrationsAndCRUD(t *testing.T) {
 	}
 
 	// Tool call upsert
-	_, err = st.UpsertToolCallMessage("conv-1", "tc-1", "pending", "Consultar Mapa", "read", map[string]interface{}{"loc": "DF"})
+	_, err = st.UpsertToolCallMessage("conv-1", "tc-1", "pending", "Consultar Mapa", "read", "", map[string]interface{}{"loc": "DF"}, "")
 	if err != nil {
 		t.Fatalf("falha ao inserir tool call pending: %v", err)
 	}
-	_, err = st.UpsertToolCallMessage("conv-1", "tc-1", "completed", "Consultar Mapa", "read", map[string]interface{}{"loc": "DF"})
+	_, err = st.UpsertToolCallMessage("conv-1", "tc-1", "completed", "Consultar Mapa", "read", "", map[string]interface{}{"loc": "DF"}, "")
 	if err != nil {
 		t.Fatalf("falha ao atualizar tool call completed: %v", err)
 	}
@@ -134,6 +135,100 @@ func TestStore_MigrationsAndCRUD(t *testing.T) {
 	msgsAfter, _ := st.GetMessages("conv-1")
 	if len(msgsAfter) != 0 {
 		t.Fatalf("esperava 0 mensagens após deletar conversa, obteve %d", len(msgsAfter))
+	}
+}
+
+func TestStore_ToolCall_UpsertAndIsolation(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	st, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("erro ao abrir store: %v", err)
+	}
+	defer st.Close()
+
+	if err := st.CreateConversation(&Conversation{
+		ID:      "conv-1",
+		Title:   "Test",
+		Agent:   "agy",
+		ModelID: "m1",
+		CWD:     "/tmp",
+	}); err != nil {
+		t.Fatalf("falha ao criar conversa: %v", err)
+	}
+
+	// 1. Duas chamadas com IDs diferentes na mesma conversa -> 2 linhas role=tool_call
+	_, err = st.UpsertToolCallMessage("conv-1", "tc-1", "in_progress", "Tool 1", "execute", "call_mcp_tool", map[string]interface{}{"cmd": "ls"}, "")
+	if err != nil {
+		t.Fatalf("falha tool 1: %v", err)
+	}
+	_, err = st.UpsertToolCallMessage("conv-1", "tc-2", "in_progress", "Tool 2", "execute", "call_mcp_tool", map[string]interface{}{"cmd": "pwd"}, "")
+	if err != nil {
+		t.Fatalf("falha tool 2: %v", err)
+	}
+
+	msgs, err := st.GetMessages("conv-1")
+	if err != nil {
+		t.Fatalf("falha ao buscar mensagens: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("esperava 2 mensagens role=tool_call, obteve %d", len(msgs))
+	}
+
+	// 2. Update de uma (tc-1) -> continuam 2 e só uma mudou, meta contém name e rawOutput, rawOutput vazio não vai no meta
+	_, err = st.UpsertToolCallMessage("conv-1", "tc-1", "completed", "Tool 1", "execute", "call_mcp_tool", map[string]interface{}{"cmd": "ls"}, "output 1")
+	if err != nil {
+		t.Fatalf("falha update tool 1: %v", err)
+	}
+
+	msgs, err = st.GetMessages("conv-1")
+	if err != nil {
+		t.Fatalf("falha ao buscar mensagens: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("esperava 2 mensagens após update, obteve %d", len(msgs))
+	}
+
+	// Verificar mensagem tc-1 (tem rawOutput e name)
+	var meta1 map[string]interface{}
+	if err := json.Unmarshal([]byte(msgs[0].Meta), &meta1); err != nil {
+		t.Fatalf("erro ao parsear meta 1: %v", err)
+	}
+	if meta1["toolCallId"] != "tc-1" || meta1["status"] != "completed" || meta1["name"] != "call_mcp_tool" || meta1["rawOutput"] != "output 1" {
+		t.Fatalf("meta1 incorreto: %+v", meta1)
+	}
+
+	// Verificar mensagem tc-2 (rawOutput vazio não deve estar no meta)
+	var meta2 map[string]interface{}
+	if err := json.Unmarshal([]byte(msgs[1].Meta), &meta2); err != nil {
+		t.Fatalf("erro ao parsear meta 2: %v", err)
+	}
+	if meta2["toolCallId"] != "tc-2" || meta2["status"] != "in_progress" || meta2["name"] != "call_mcp_tool" {
+		t.Fatalf("meta2 incorreto: %+v", meta2)
+	}
+	if _, ok := meta2["rawOutput"]; ok {
+		t.Fatalf("meta2 não deveria ter rawOutput quando vazio, obteve %v", meta2["rawOutput"])
+	}
+
+	// 3. Duas chamadas com ID vazio -> 2 linhas adicionais (sem colapso)
+	mEmpty1, err := st.UpsertToolCallMessage("conv-1", "", "in_progress", "Empty 1", "execute", "tool_a", nil, "")
+	if err != nil {
+		t.Fatalf("falha empty 1: %v", err)
+	}
+	mEmpty2, err := st.UpsertToolCallMessage("conv-1", "", "in_progress", "Empty 2", "execute", "tool_b", nil, "")
+	if err != nil {
+		t.Fatalf("falha empty 2: %v", err)
+	}
+
+	msgs, err = st.GetMessages("conv-1")
+	if err != nil {
+		t.Fatalf("falha ao buscar mensagens: %v", err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("esperava 4 mensagens no total (2 vazias inseridas separadamente), obteve %d", len(msgs))
+	}
+	if mEmpty1.ID == mEmpty2.ID {
+		t.Fatalf("mensagens com ID vazio não deveriam ter o mesmo ID de banco: %d == %d", mEmpty1.ID, mEmpty2.ID)
 	}
 }
 

@@ -426,6 +426,117 @@ func handlePrompt(req rpcReq) {
 		return
 	}
 
+	if strings.Contains(promptText, "test-slow") {
+		// Aguarda cancelamento ou timeout longo
+		select {
+		case <-cancelCh:
+			sendResponse(*req.ID, map[string]interface{}{
+				"stopReason": "cancelled",
+			})
+			return
+		case <-time.After(10 * time.Second):
+			sendResponse(*req.ID, map[string]interface{}{
+				"stopReason": "end_turn",
+			})
+			return
+		}
+	}
+
+	if strings.Contains(promptText, "test-tools-camel") {
+		// Tool call 1 (in_progress) com toolCallId camelCase real
+		sendNotification("session/update", map[string]interface{}{
+			"sessionId": sessID,
+			"update": map[string]interface{}{
+				"sessionUpdate": "tool_call",
+				"toolCallId":    "call_7530034839743884041",
+				"kind":          "execute",
+				"name":          "call_mcp_tool",
+				"title":         "MCP Tool browser_status",
+				"status":        "in_progress",
+				"rawInput": map[string]interface{}{
+					"ServerName": "browser-bridge",
+					"ToolName":   "browser_status",
+				},
+			},
+		})
+
+		// Tool call 2 (in_progress)
+		sendNotification("session/update", map[string]interface{}{
+			"sessionId": sessID,
+			"update": map[string]interface{}{
+				"sessionUpdate": "tool_call",
+				"toolCallId":    "call_7530034839743884042",
+				"kind":          "execute",
+				"name":          "call_mcp_tool",
+				"title":         "MCP Tool browser_click",
+				"status":        "in_progress",
+				"rawInput": map[string]interface{}{
+					"ServerName": "browser-bridge",
+					"ToolName":   "browser_click",
+				},
+			},
+		})
+
+		// Update de sucesso da primeira chamada
+		sendNotification("session/update", map[string]interface{}{
+			"sessionId": sessID,
+			"update": map[string]interface{}{
+				"sessionUpdate": "tool_call_update",
+				"toolCallId":    "call_7530034839743884041",
+				"kind":          "execute",
+				"name":          "call_mcp_tool",
+				"title":         "MCP Tool browser_status",
+				"status":        "completed",
+				"rawInput": map[string]interface{}{
+					"ServerName": "browser-bridge",
+					"ToolName":   "browser_status",
+				},
+				"content": []map[string]interface{}{
+					{
+						"type": "content",
+						"content": map[string]interface{}{
+							"type": "text",
+							"text": "modo: agente (porta 9223)",
+						},
+					},
+				},
+				"rawOutput": "modo: agente (porta 9223)",
+			},
+		})
+
+		// Update de falha da segunda chamada
+		sendNotification("session/update", map[string]interface{}{
+			"sessionId": sessID,
+			"update": map[string]interface{}{
+				"sessionUpdate": "tool_call_update",
+				"toolCallId":    "call_7530034839743884042",
+				"kind":          "execute",
+				"name":          "call_mcp_tool",
+				"title":         "MCP Tool browser_click",
+				"status":        "failed",
+				"rawInput": map[string]interface{}{
+					"ServerName": "browser-bridge",
+					"ToolName":   "browser_click",
+				},
+				"content": []map[string]interface{}{
+					{
+						"type": "content",
+						"content": map[string]interface{}{
+							"type": "text",
+							"text": "elemento #btn não encontrado",
+						},
+					},
+				},
+				"rawOutput": "elemento #btn não encontrado",
+			},
+		})
+
+		sendResponse(*req.ID, map[string]interface{}{
+			"stopReason": "end_turn",
+		})
+		return
+	}
+
 	// Fluxo normal
 	sendNotification("session/update", map[string]interface{}{
 		"sessionId": sessID,

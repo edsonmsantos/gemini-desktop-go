@@ -5,6 +5,7 @@ export interface ToolCall {
   status: ToolCallStatus
   title: string
   kind?: string
+  name?: string
   rawInput?: Record<string, unknown>
   rawOutput?: string
 }

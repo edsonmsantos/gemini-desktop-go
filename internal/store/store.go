@@ -411,46 +411,69 @@ func (s *Store) AppendOrUpdateChunk(convID string, role string, chunkText string
 }
 
 // UpsertToolCallMessage insere ou atualiza o status de uma chamada de ferramenta
-func (s *Store) UpsertToolCallMessage(convID string, toolCallID, status, title, kind string, rawInput map[string]interface{}) (*Message, error) {
+func (s *Store) UpsertToolCallMessage(convID string, toolCallID, status, title, kind, name string, rawInput map[string]interface{}, rawOutput string) (*Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now().UnixMilli()
+
+	// Defesa extra: se toolCallID chegar vazio, gerar "tc-<UnixNano>" e inserir — nunca fazer lookup por ID vazio
+	if toolCallID == "" {
+		toolCallID = fmt.Sprintf("tc-%d", time.Now().UnixNano())
+	} else {
+		// Procura se já existe mensagem deste toolCallId na conversa
+		// Busca única via json_extract (evita N+1: SELECT de todos os tool_calls
+		// + uma QueryRow de meta por linha)
+		var id int64
+		var seq int
+		errLookup := s.db.QueryRow(`SELECT id, seq FROM messages
+			WHERE conversation_id = ? AND role = 'tool_call'
+			  AND json_extract(meta, '$.toolCallId') = ?
+			LIMIT 1`, convID, toolCallID).Scan(&id, &seq)
+		if errLookup == nil {
+			metaObj := map[string]interface{}{
+				"toolCallId": toolCallID,
+				"status":     status,
+				"title":      title,
+				"kind":       kind,
+				"name":       name,
+				"rawInput":   rawInput,
+			}
+			if rawOutput != "" {
+				metaObj["rawOutput"] = rawOutput
+			}
+			metaBytes, _ := json.Marshal(metaObj)
+			metaStr := string(metaBytes)
+
+			_, _ = s.db.Exec(`UPDATE messages SET content = ?, meta = ? WHERE id = ?`, title, metaStr, id)
+			_, _ = s.db.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now, convID)
+			return &Message{
+				ID:             id,
+				ConversationID: convID,
+				Seq:            seq,
+				Role:           "tool_call",
+				Content:        title,
+				Meta:           metaStr,
+				CreatedAt:      now,
+			}, nil
+		}
+	}
 
 	metaObj := map[string]interface{}{
 		"toolCallId": toolCallID,
 		"status":     status,
 		"title":      title,
 		"kind":       kind,
+		"name":       name,
 		"rawInput":   rawInput,
+	}
+	if rawOutput != "" {
+		metaObj["rawOutput"] = rawOutput
 	}
 	metaBytes, _ := json.Marshal(metaObj)
 	metaStr := string(metaBytes)
 
-	// Procura se já existe mensagem deste toolCallId na conversa
-	// Busca única via json_extract (evita N+1: SELECT de todos os tool_calls
-	// + uma QueryRow de meta por linha)
-	var id int64
-	var seq int
-	errLookup := s.db.QueryRow(`SELECT id, seq FROM messages
-		WHERE conversation_id = ? AND role = 'tool_call'
-		  AND json_extract(meta, '$.toolCallId') = ?
-		LIMIT 1`, convID, toolCallID).Scan(&id, &seq)
-	if errLookup == nil {
-		_, _ = s.db.Exec(`UPDATE messages SET content = ?, meta = ? WHERE id = ?`, title, metaStr, id)
-		_, _ = s.db.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now, convID)
-		return &Message{
-			ID:             id,
-			ConversationID: convID,
-			Seq:            seq,
-			Role:           "tool_call",
-			Content:        title,
-			Meta:           metaStr,
-			CreatedAt:      now,
-		}, nil
-	}
-
-	// Não encontrou, insere novo
+	// Não encontrou ou ID gerado, insere novo
 	var maxSeq sql.NullInt64
 	_ = s.db.QueryRow(`SELECT MAX(seq) FROM messages WHERE conversation_id = ?`, convID).Scan(&maxSeq)
 	nextSeq := int(maxSeq.Int64) + 1

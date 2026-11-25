@@ -187,7 +187,10 @@ func TestFolders_CycleAndValidation(t *testing.T) {
 	}
 
 	// 8. GET /api/folders agora deve estar vazia
-	getResp2, _ := http.Get(ts.URL + "/api/folders")
+	getResp2, err := http.Get(ts.URL + "/api/folders")
+	if err != nil {
+		t.Fatalf("falha no GET /api/folders: %v", err)
+	}
 	defer getResp2.Body.Close()
 	var foldersData2 struct {
 		Folders []store.FolderInfo `json:"folders"`
