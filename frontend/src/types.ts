@@ -37,10 +37,16 @@ export interface Conversation {
   agent: string
   modelId: string
   modeId?: string
+  folder?: string
   cwd: string
   sessionId: string
   createdAt: number
   updatedAt: number
+}
+
+export interface FolderInfo {
+  name: string
+  count: number
 }
 
 export interface Message {

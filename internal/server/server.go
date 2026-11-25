@@ -401,6 +401,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("PUT /api/prompts/{id}", s.handleUpdatePrompt)
 	s.mux.HandleFunc("DELETE /api/prompts/{id}", s.handleDeletePrompt)
 
+	// Pastas de conversas
+	s.mux.HandleFunc("GET /api/folders", s.handleListFolders)
+	s.mux.HandleFunc("PATCH /api/conversations/{id}/folder", s.handlePatchConversationFolder)
+	s.mux.HandleFunc("DELETE /api/folders/{name...}", s.handleDeleteFolder)
+
 	// Endpoints v2 de conversas
 	s.mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)
 	s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)
