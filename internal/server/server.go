@@ -395,6 +395,12 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/files/content", s.handleFileContent)
 	s.mux.HandleFunc("POST /api/sources/resolve", s.handleResolveSources)
 
+	// Biblioteca de prompts salvos
+	s.mux.HandleFunc("GET /api/prompts", s.handleListPrompts)
+	s.mux.HandleFunc("POST /api/prompts", s.handleCreatePrompt)
+	s.mux.HandleFunc("PUT /api/prompts/{id}", s.handleUpdatePrompt)
+	s.mux.HandleFunc("DELETE /api/prompts/{id}", s.handleDeletePrompt)
+
 	// Endpoints v2 de conversas
 	s.mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)
 	s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)

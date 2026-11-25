@@ -2,9 +2,10 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { MicIcon, PlusIcon, SendIcon, StopIcon, FileIcon, CloseIcon, ZapIcon, SpinnerIcon, ClipboardIcon } from './icons'
 import { ModelSelect } from './ModelSelect'
 import { ModeSelect } from './ModeSelect'
-import { Model, ModesInfo, Skill } from '../types'
+import { Model, ModesInfo, SavedPrompt, Skill } from '../types'
 import { uploadAttachment, pasteClipboardImage } from '../api'
-import { selectFilesViaWails, fetchSkills } from '../api'
+import { selectFilesViaWails, fetchSkills, fetchSavedPrompts } from '../api'
+import { PromptsPalette } from './PromptsPalette'
 
 interface PromptBarProps {
   prompt: string
@@ -145,6 +146,16 @@ export const PromptBar: React.FC<PromptBarProps> = ({
   const [skillsError, setSkillsError] = useState<string | null>(null)
   const [selectedIndex, setSelectedIndex] = useState<number>(0)
 
+  // Estado da paleta de prompts salvos (@)
+  const promptPaletteRef = useRef<HTMLDivElement>(null)
+  const [showPrompts, setShowPrompts] = useState<boolean>(false)
+  const [promptTokenRange, setPromptTokenRange] = useState<{ start: number; end: number } | null>(null)
+  const [promptFilterQuery, setPromptFilterQuery] = useState<string>('')
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([])
+  const [isLoadingPrompts, setIsLoadingPrompts] = useState<boolean>(false)
+  const [promptsError, setPromptsError] = useState<string | null>(null)
+  const [promptSelectedIndex, setPromptSelectedIndex] = useState<number>(0)
+
   useEffect(() => {
     setHasNativePicker(Boolean(window.go?.main?.App?.SelectFiles))
   }, [])
@@ -156,11 +167,12 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     }
   }, [prompt])
 
-  // Verificação e ativação da paleta de skills
-  const checkSkillTrigger = useCallback(
+  // Verificação e ativação das paletas (skills: / ou $, prompts: @)
+  const checkTriggers = useCallback(
     (text: string, cursorPos: number) => {
       if (isPastingRef.current || cursorPos < 1) {
         if (showSkills) setShowSkills(false)
+        if (showPrompts) setShowPrompts(false)
         return
       }
 
@@ -174,6 +186,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
       const candidate = textBefore.slice(tokenStart)
 
       if (candidate.startsWith('/') || candidate.startsWith('$')) {
+        if (showPrompts) setShowPrompts(false)
         const query = candidate.slice(1)
         setTokenRange({ start: tokenStart, end: cursorPos })
         setSkillQuery(query)
@@ -192,14 +205,35 @@ export const PromptBar: React.FC<PromptBarProps> = ({
               setIsLoadingSkills(false)
             })
         }
+      } else if (candidate.startsWith('@')) {
+        if (showSkills) setShowSkills(false)
+        const query = candidate.slice(1)
+        setPromptTokenRange({ start: tokenStart, end: cursorPos })
+        setPromptFilterQuery(query)
+
+        if (!showPrompts) {
+          setShowPrompts(true)
+          setIsLoadingPrompts(true)
+          setPromptsError(null)
+          fetchSavedPrompts()
+            .then((res) => {
+              setSavedPrompts(res ?? [])
+              setIsLoadingPrompts(false)
+            })
+            .catch(() => {
+              setPromptsError('Erro ao carregar prompts')
+              setIsLoadingPrompts(false)
+            })
+        }
       } else {
         if (showSkills) setShowSkills(false)
+        if (showPrompts) setShowPrompts(false)
       }
     },
-    [showSkills, cwd]
+    [showSkills, showPrompts, cwd]
   )
 
-  // Filtragem e organização por escopo
+  // Filtragem e organização de skills por escopo
   const q = skillQuery.toLowerCase().trim()
   const filteredSkills = skills.filter((s) => {
     if (!q) return true
@@ -219,7 +253,21 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     setSelectedIndex(0)
   }, [skillQuery, skills])
 
-  // Fechar paleta em clique-fora
+  // Filtragem de prompts salvos
+  const pq = promptFilterQuery.toLowerCase().trim()
+  const filteredSavedPrompts = savedPrompts.filter((p) => {
+    if (!pq) return true
+    return (
+      p.title.toLowerCase().includes(pq) ||
+      p.content.toLowerCase().includes(pq)
+    )
+  })
+
+  useEffect(() => {
+    setPromptSelectedIndex(0)
+  }, [promptFilterQuery, savedPrompts])
+
+  // Fechar paleta de skills em clique-fora
   useEffect(() => {
     if (!showSkills) return
     const handleClickOutside = (e: MouseEvent) => {
@@ -238,6 +286,25 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     }
   }, [showSkills])
 
+  // Fechar paleta de prompts em clique-fora
+  useEffect(() => {
+    if (!showPrompts) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        promptPaletteRef.current &&
+        !promptPaletteRef.current.contains(e.target as Node) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(e.target as Node)
+      ) {
+        setShowPrompts(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showPrompts])
+
   const handleSelectSkill = (skill: Skill) => {
     if (!tokenRange) return
     const before = prompt.slice(0, tokenRange.start)
@@ -250,6 +317,25 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     requestAnimationFrame(() => {
       if (textareaRef.current) {
         const newPos = before.length + replacement.length
+        textareaRef.current.selectionStart = newPos
+        textareaRef.current.selectionEnd = newPos
+        textareaRef.current.focus()
+      }
+    })
+  }
+
+  const handleSelectSavedPrompt = (sp: SavedPrompt) => {
+    if (!promptTokenRange) return
+    const before = prompt.slice(0, promptTokenRange.start)
+    const after = prompt.slice(promptTokenRange.end)
+    const cleanContent = sp.content.endsWith(' ') || sp.content.endsWith('\n') ? sp.content : `${sp.content} `
+    const newPrompt = `${before}${cleanContent}${after}`
+    onChangePrompt(newPrompt)
+    setShowPrompts(false)
+
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        const newPos = before.length + cleanContent.length
         textareaRef.current.selectionStart = newPos
         textareaRef.current.selectionEnd = newPos
         textareaRef.current.focus()
@@ -296,6 +382,41 @@ export const PromptBar: React.FC<PromptBarProps> = ({
       }
     }
 
+    if (showPrompts) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        if (filteredSavedPrompts.length > 0) {
+          setPromptSelectedIndex((prev) => (prev + 1) % filteredSavedPrompts.length)
+        }
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (filteredSavedPrompts.length > 0) {
+          setPromptSelectedIndex((prev) => (prev - 1 + filteredSavedPrompts.length) % filteredSavedPrompts.length)
+        }
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        if (filteredSavedPrompts.length > 0 && filteredSavedPrompts[promptSelectedIndex]) {
+          e.preventDefault()
+          handleSelectSavedPrompt(filteredSavedPrompts[promptSelectedIndex])
+          return
+        } else {
+          setShowPrompts(false)
+          if (e.key === 'Tab') {
+            e.preventDefault()
+            return
+          }
+        }
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowPrompts(false)
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (canSend) {
@@ -307,6 +428,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     isPastingRef.current = true
     setShowSkills(false)
+    setShowPrompts(false)
     setTimeout(() => {
       isPastingRef.current = false
     }, 150)
@@ -480,6 +602,19 @@ export const PromptBar: React.FC<PromptBarProps> = ({
         '--wails-drop-target': 'drop'
       } as React.CSSProperties}
     >
+      {/* Painel flutuante de Prompts Salvos (@) */}
+      {showPrompts && (
+        <PromptsPalette
+          paletteRef={promptPaletteRef}
+          prompts={filteredSavedPrompts}
+          isLoading={isLoadingPrompts}
+          error={promptsError}
+          selectedIndex={promptSelectedIndex}
+          onSelectPrompt={handleSelectSavedPrompt}
+          onClose={() => setShowPrompts(false)}
+        />
+      )}
+
       {/* Painel flutuante de Skills (estilo ZCode) */}
       {showSkills && (
         <div
@@ -771,7 +906,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
           onChange={(e) => {
             onChangePrompt(e.target.value)
             if (!isPastingRef.current) {
-              checkSkillTrigger(e.target.value, e.target.selectionStart)
+              checkTriggers(e.target.value, e.target.selectionStart)
             }
           }}
           onKeyUp={(e) => {
@@ -783,13 +918,13 @@ export const PromptBar: React.FC<PromptBarProps> = ({
               e.key !== 'Escape'
             ) {
               const pos = textareaRef.current?.selectionStart ?? prompt.length
-              checkSkillTrigger(prompt, pos)
+              checkTriggers(prompt, pos)
             }
           }}
           onClick={() => {
-            if (showSkills) {
+            if (showSkills || showPrompts) {
               const pos = textareaRef.current?.selectionStart ?? prompt.length
-              checkSkillTrigger(prompt, pos)
+              checkTriggers(prompt, pos)
             }
           }}
           onKeyDown={handleKeyDown}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { CloseIcon, RefreshIcon, SpinnerIcon } from './icons'
-import { MCPServer, Skill } from '../types'
-import { fetchMCPServers, fetchSkills, toggleMCPServer } from '../api'
+import { MCPServer, SavedPrompt, Skill } from '../types'
+import { fetchMCPServers, fetchSkills, toggleMCPServer, fetchSavedPrompts, createSavedPrompt, updateSavedPrompt, deleteSavedPrompt } from '../api'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -10,7 +10,7 @@ interface SettingsModalProps {
   agentCmd: string
   theme: 'dark' | 'light'
   onToggleTheme: () => void
-  initialTab?: 'general' | 'mcp' | 'skills'
+  initialTab?: 'general' | 'mcp' | 'skills' | 'prompts'
   cwd?: string
 }
 
@@ -24,7 +24,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   initialTab = 'general',
   cwd
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'mcp' | 'skills'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'general' | 'mcp' | 'skills' | 'prompts'>(initialTab)
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -89,6 +89,100 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, [isOpen, activeTab, loadSkills])
 
+  // Estado da aba Prompts
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([])
+  const [isLoadingPrompts, setIsLoadingPrompts] = useState<boolean>(false)
+  const [promptsError, setPromptsError] = useState<string | null>(null)
+  const [editingPromptId, setEditingPromptId] = useState<string | null>(null)
+  const [formTitle, setFormTitle] = useState<string>('')
+  const [formContent, setFormContent] = useState<string>('')
+  const [isSavingPrompt, setIsSavingPrompt] = useState<boolean>(false)
+  const [deletingPromptId, setDeletingPromptId] = useState<string | null>(null)
+
+  const loadSavedPrompts = useCallback(async () => {
+    setIsLoadingPrompts(true)
+    setPromptsError(null)
+    try {
+      const res = await fetchSavedPrompts()
+      setSavedPrompts(res ?? [])
+    } catch (err: unknown) {
+      setPromptsError(err instanceof Error ? err.message : 'Falha ao carregar prompts')
+    } finally {
+      setIsLoadingPrompts(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isOpen) {
+      loadSavedPrompts()
+    }
+  }, [isOpen, loadSavedPrompts])
+
+  const handleSavePrompt = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const title = formTitle.trim()
+    const content = formContent.trim()
+    if (!title || !content) return
+
+    setIsSavingPrompt(true)
+    setPromptsError(null)
+    try {
+      if (editingPromptId) {
+        const updated = await updateSavedPrompt(editingPromptId, { title, content })
+        if (updated) {
+          setSavedPrompts((prev) => prev.map((p) => (p.id === editingPromptId ? updated : p)))
+          setEditingPromptId(null)
+          setFormTitle('')
+          setFormContent('')
+        }
+      } else {
+        const created = await createSavedPrompt(title, content)
+        if (created) {
+          setSavedPrompts((prev) => [created, ...prev])
+          setFormTitle('')
+          setFormContent('')
+        }
+      }
+    } catch (err: unknown) {
+      setPromptsError(err instanceof Error ? err.message : 'Erro ao salvar prompt')
+    } finally {
+      setIsSavingPrompt(false)
+    }
+  }
+
+  const handleStartEdit = (p: SavedPrompt) => {
+    setEditingPromptId(p.id)
+    setFormTitle(p.title)
+    setFormContent(p.content)
+    setDeletingPromptId(null)
+  }
+
+  const handleCancelEdit = () => {
+    setEditingPromptId(null)
+    setFormTitle('')
+    setFormContent('')
+  }
+
+  const handleDeletePrompt = async (id: string) => {
+    if (deletingPromptId === id) {
+      try {
+        const ok = await deleteSavedPrompt(id)
+        if (ok) {
+          setSavedPrompts((prev) => prev.filter((p) => p.id !== id))
+          if (editingPromptId === id) {
+            handleCancelEdit()
+          }
+        }
+      } catch (err: unknown) {
+        setPromptsError(err instanceof Error ? err.message : 'Erro ao excluir prompt')
+      } finally {
+        setDeletingPromptId(null)
+      }
+    } else {
+      setDeletingPromptId(id)
+    }
+  }
+
   const handleToggle = async (server: MCPServer) => {
     const prevStatus = server.status
     const newEnable = prevStatus !== 'enabled'
@@ -142,7 +236,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div
         style={{
-          width: activeTab === 'mcp' ? 580 : 480,
+          width: activeTab === 'mcp' || activeTab === 'prompts' ? 580 : 480,
           maxWidth: '92vw',
           maxHeight: '85vh',
           backgroundColor: 'var(--bg-modal)',
@@ -258,6 +352,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }}
               >
                 {skills.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('prompts')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 14,
+              fontSize: 13,
+              fontWeight: 500,
+              backgroundColor: activeTab === 'prompts' ? 'var(--bg-pill-hover)' : 'transparent',
+              color: activeTab === 'prompts' ? 'var(--text-primary)' : 'var(--text-muted)',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              transition: 'background 0.15s, color 0.15s'
+            }}
+          >
+            <span>Prompts</span>
+            {savedPrompts.length > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  padding: '1px 6px',
+                  borderRadius: 10,
+                  backgroundColor: 'var(--bg-pill)',
+                  color: 'var(--text-secondary)'
+                }}
+              >
+                {savedPrompts.length}
               </span>
             )}
           </button>
@@ -771,6 +898,234 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, padding: '0 2px' }}>
               💡 Em uma conversa, digite <code style={{ fontFamily: 'var(--font-mono)' }}>/</code> ou{' '}
               <code style={{ fontFamily: 'var(--font-mono)' }}>$</code> no campo de prompt para inserir uma skill.
+            </div>
+          </div>
+        )}
+
+        {/* Conteúdo da Aba Prompts */}
+        {activeTab === 'prompts' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '60vh' }}>
+            {/* Mensagem de erro se houver */}
+            {promptsError && (
+              <div
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid var(--status-failed)',
+                  color: 'var(--status-failed)',
+                  fontSize: 13
+                }}
+              >
+                {promptsError}
+              </div>
+            )}
+
+            {/* Formulário de criação/edição no topo */}
+            <form
+              onSubmit={handleSavePrompt}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: 12,
+                borderRadius: 10,
+                backgroundColor: 'var(--bg-sidebar)',
+                border: '1px solid var(--border-subtle)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {editingPromptId ? 'Editar Prompt' : 'Novo Prompt'}
+                </span>
+                {editingPromptId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--text-muted)',
+                      border: 'none',
+                      background: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancelar edição
+                  </button>
+                )}
+              </div>
+
+              <input
+                type="text"
+                placeholder="Título do prompt (ex: Revisão de código)"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'var(--bg-modal)',
+                  border: '1px solid var(--border-card)',
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  outline: 'none'
+                }}
+              />
+
+              <textarea
+                placeholder="Conteúdo do prompt..."
+                value={formContent}
+                onChange={(e) => setFormContent(e.target.value)}
+                rows={3}
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'var(--bg-modal)',
+                  border: '1px solid var(--border-card)',
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  resize: 'vertical',
+                  outline: 'none',
+                  fontFamily: 'inherit'
+                }}
+              />
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 2 }}>
+                <button
+                  type="submit"
+                  disabled={isSavingPrompt || !formTitle.trim() || !formContent.trim()}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 6,
+                    backgroundColor: 'var(--accent-blue)',
+                    color: '#ffffff',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    border: 'none',
+                    cursor: isSavingPrompt || !formTitle.trim() || !formContent.trim() ? 'not-allowed' : 'pointer',
+                    opacity: isSavingPrompt || !formTitle.trim() || !formContent.trim() ? 0.6 : 1
+                  }}
+                >
+                  {isSavingPrompt ? 'Salvando...' : editingPromptId ? 'Salvar Alterações' : 'Salvar Prompt'}
+                </button>
+              </div>
+            </form>
+
+            {/* Cabeçalho da Lista */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Prompts Salvos ({savedPrompts.length})
+              </span>
+              <button
+                type="button"
+                onClick={loadSavedPrompts}
+                disabled={isLoadingPrompts}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 12,
+                  color: 'var(--text-muted)',
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                <RefreshIcon size={12} />
+                <span>Atualizar</span>
+              </button>
+            </div>
+
+            {/* Lista de Prompts */}
+            {isLoadingPrompts && savedPrompts.length === 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16, color: 'var(--text-muted)', fontSize: 13 }}>
+                <SpinnerIcon size={14} /> Carregando prompts salvos...
+              </div>
+            ) : savedPrompts.length === 0 ? (
+              <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                Nenhum prompt salvo ainda. Crie um acima para reutilizar com o gatilho <code style={{ fontFamily: 'var(--font-mono)' }}>@</code>!
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {savedPrompts.map((p) => {
+                  const singleLinePreview = p.content.replace(/[\r\n]+/g, ' ').trim()
+                  const isConfirmingDelete = deletingPromptId === p.id
+
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        backgroundColor: 'var(--bg-sidebar)',
+                        border: '1px solid var(--border-subtle)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {p.title}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 3,
+                            fontSize: 12,
+                            color: 'var(--text-secondary)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                          title={p.content}
+                        >
+                          {singleLinePreview}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(p)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 12,
+                            borderRadius: 6,
+                            border: '1px solid var(--border-card)',
+                            backgroundColor: 'transparent',
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePrompt(p.id)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 12,
+                            borderRadius: 6,
+                            border: isConfirmingDelete ? '1px solid var(--status-failed)' : '1px solid var(--border-card)',
+                            backgroundColor: isConfirmingDelete ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                            color: isConfirmingDelete ? 'var(--status-failed)' : 'var(--text-muted)',
+                            fontWeight: isConfirmingDelete ? 600 : 400,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s'
+                          }}
+                        >
+                          {isConfirmingDelete ? 'Confirmar?' : 'Excluir'}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Dica de uso na conversa */}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, padding: '0 2px' }}>
+              💡 Em uma conversa, digite <code style={{ fontFamily: 'var(--font-mono)' }}>@</code> no campo de mensagem para inserir um prompt salvo.
             </div>
           </div>
         )}

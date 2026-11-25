@@ -183,3 +183,11 @@ export interface SourceResolution {
   status: number
 }
 
+export interface SavedPrompt {
+  id: string
+  title: string
+  content: string
+  createdAt?: number
+  updatedAt?: number
+}
+

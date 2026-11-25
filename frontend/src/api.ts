@@ -1,4 +1,4 @@
-import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
+import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, MCPResponse, MCPServer, Message, Model, SavedPrompt, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
 
 declare module 'react' {
   // Permite custom properties (--var) em objetos de estilo
@@ -532,4 +532,58 @@ export async function resolveSources(urls: string[]): Promise<SourceResolution[]
     return []
   }
 }
+
+export async function fetchSavedPrompts(): Promise<SavedPrompt[]> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/prompts`)
+    if (!res.ok) return []
+    const data = await res.json()
+    return data ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function createSavedPrompt(title: string, content: string): Promise<SavedPrompt | null> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/prompts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content })
+    })
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function updateSavedPrompt(
+  id: string,
+  data: { title?: string; content?: string }
+): Promise<SavedPrompt | null> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/prompts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function deleteSavedPrompt(id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/prompts/${id}`, {
+      method: 'DELETE'
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 
