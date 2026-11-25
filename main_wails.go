@@ -21,11 +21,15 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed build/appicon.png
+var appIcon []byte
 
 // AppConfigResponse expõe detalhes da configuração para a UI
 type AppConfigResponse struct {
@@ -137,6 +141,7 @@ func (a *App) startup(ctx context.Context) {
 
 	a.server = server.NewServerV2(client, cfg.DefaultCWD, web.Files, st)
 	a.server.SetTempWorkspacesDir(cfg.GetTempWorkspacesDir())
+	a.server.SetNotificationsEnabled(cfg.NotificationsEnabled())
 	addr := fmt.Sprintf("127.0.0.1:%d", a.port)
 	a.httpServer = &http.Server{
 		Addr:    addr,
@@ -187,8 +192,11 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 19, G: 19, B: 20, A: 255}, // #131314
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
+		Linux: &linux.Options{
+			Icon: appIcon,
+		},
+		OnStartup:  app.startup,
+		OnShutdown: app.shutdown,
 		Bind: []interface{}{
 			app,
 		},

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Gemini Desktop
+GenericName=Cliente ACP para agentes Gemini/Antigravity
+Comment=Cliente desktop nativo para agentes ACP (agy acp / gemini --acp)
+Exec=/home/edson/Documentos/Github/gemini-desktop-go/build/bin/geminidesktop-go
+Icon=geminidesktop-go
+Terminal=false
+StartupNotify=true
+StartupWMClass=Geminidesktop-go
+Categories=Development;Network;
+Keywords=gemini;antigravity;acp;agent;chat;
