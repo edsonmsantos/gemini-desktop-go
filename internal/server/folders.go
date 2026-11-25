@@ -35,7 +35,7 @@ func (s *Server) handleListFolders(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PATCH /api/conversations/{id}/folder body {folder: string} → move (404 se conversa não existe; folder trimado, pode ser ” para remover da pasta). Retorna {id, folder}.
+// PATCH /api/conversations/{id}/folder body {folder: string} → move (404 se conversa não existe; folder trimado, pode ser vazio para remover da pasta). Retorna {id, folder}.
 func (s *Server) handlePatchConversationFolder(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if s.store == nil {

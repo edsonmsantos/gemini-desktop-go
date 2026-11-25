@@ -564,7 +564,7 @@ func normalizeToolOutput(rawOut json.RawMessage, content json.RawMessage) string
 			}
 			cutPoint = i + rLen
 		}
-		out = out[:cutPoint] + fmt.Sprintf("\n…[saída truncada: 16384 de %d bytes]", totalBytes)
+		out = out[:cutPoint] + fmt.Sprintf("\n…[saída truncada: %d de %d bytes]", cutPoint, totalBytes)
 	}
 
 	return out
