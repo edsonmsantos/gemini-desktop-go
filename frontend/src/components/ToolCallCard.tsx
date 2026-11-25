@@ -48,6 +48,10 @@ export const ToolCallCard: React.FC<ToolCallCardProps> = ({ toolCall }) => {
   const statusColor = getStatusColor(toolCall.status)
   const isPulsing = toolCall.status === 'in_progress'
   const kind = (toolCall.kind || '').toLowerCase()
+
+  // Corpos volumosos (comando/saída, diff) ficam FECHADOS por padrão —
+  // só aparecem quando o usuário clica no cabeçalho (igual ao thinking)
+  const isCollapsible = kind === 'execute' || kind === 'command' || kind === 'edit' 
   const rawInput = toolCall.rawInput || {}
   const rawOutput = toolCall.rawOutput || (rawInput.output as string | undefined)
 
@@ -308,9 +312,38 @@ export const ToolCallCard: React.FC<ToolCallCardProps> = ({ toolCall }) => {
         gap: 6
       }}
     >
-      {/* Cabeçalho do Card */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+      {/* Cabeçalho do Card (clicável quando o corpo é colapsável) */}
+      <button
+        type="button"
+        onClick={isCollapsible ? () => setIsExpanded((prev) => !prev) : undefined}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          width: '100%',
+          padding: 0,
+          border: 'none',
+          background: 'none',
+          cursor: isCollapsible ? 'pointer' : 'default',
+          textAlign: 'left'
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+          {isCollapsible && (
+            <span
+              style={{
+                transform: isExpanded ? 'rotate(90deg)' : 'none',
+                transition: 'transform 0.15s',
+                display: 'flex',
+                alignItems: 'center',
+                color: 'var(--text-muted)',
+                flexShrink: 0
+              }}
+            >
+              <ChevronRightIcon size={14} />
+            </span>
+          )}
           <div
             style={{
               display: 'flex',
@@ -373,10 +406,10 @@ export const ToolCallCard: React.FC<ToolCallCardProps> = ({ toolCall }) => {
             {getStatusLabel(toolCall.status)}
           </span>
         </div>
-      </div>
+      </button>
 
-      {/* Corpo especializado por kind */}
-      {renderKindBody()}
+      {/* Corpo especializado por kind — colapsado por padrão em execute/edit */}
+      {(!isCollapsible || isExpanded) && renderKindBody()}
     </div>
   )
 }
