@@ -1,4 +1,4 @@
-import { AgentInfo, CapabilitiesResponse, Conversation, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, Workspace, WSEvent } from './types'
+import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, Workspace, WSEvent } from './types'
 
 declare global {
   interface Window {
@@ -216,6 +216,18 @@ export async function uploadAttachment(file: File): Promise<string | null> {
     return data.path || null
   } catch {
     return null
+  }
+}
+
+// fetchArtifacts lista os arquivos criados/modificados no workspace da conversa
+export async function fetchArtifacts(convId: string): Promise<Artifact[]> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(convId)}/artifacts`)
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.artifacts ?? []
+  } catch {
+    return []
   }
 }
 

@@ -731,6 +731,7 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
             onRegenerate={handleRegenerate}
             onEditMessage={handleEditMessage}
             conversationTitle={activeConversation?.title || ''}
+            conversationId={activeConversationId || undefined}
           />
         )}
       </main>

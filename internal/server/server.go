@@ -372,6 +372,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/search", s.handleSearch)
 	s.mux.HandleFunc("POST /api/attachments", s.handleAttachment)
 	s.mux.HandleFunc("GET /api/clipboard/image", s.handleClipboardImage)
+	s.mux.HandleFunc("GET /api/conversations/{id}/artifacts", s.handleArtifacts)
 	s.mux.HandleFunc("POST /api/export/pdf", s.handleExportPDF)
 	s.mux.HandleFunc("POST /api/open-url", s.handleOpenURL)
 

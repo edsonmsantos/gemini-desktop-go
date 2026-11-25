@@ -150,3 +150,10 @@ export interface WSEvent {
   turnDone?: { stopReason: string }
   error?: { msg: string }
 }
+
+export interface Artifact {
+  path: string
+  name: string
+  size: number
+  modified: number
+}
