@@ -81,6 +81,10 @@ func NewStore(dbPath string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("falha na migration do banco: %w", err)
 	}
+	if err := s.migratePrompts(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("falha na migration de prompts: %w", err)
+	}
 
 	return s, nil
 }
