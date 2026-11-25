@@ -7,7 +7,7 @@ import { PermissionCard } from './PermissionCard'
 import { PlanCard } from './PlanCard'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { GeminiSparkle } from './icons'
-import { Message, Model, PermissionRequest, Plan, ToolCall } from '../types'
+import { Message, Model, ModesInfo, PermissionRequest, Plan, ToolCall } from '../types'
 
 interface ChatViewProps {
   messages: Message[]
@@ -25,6 +25,9 @@ interface ChatViewProps {
   models: Model[]
   selectedModelId: string
   onSelectModel: (id: string) => void
+  modes?: ModesInfo | null
+  selectedModeId?: string
+  onSelectMode?: (id: string) => void
   files?: string[]
   onAddFiles?: (files: string[]) => void
   onRemoveFile?: (index: number) => void
@@ -46,6 +49,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   models,
   selectedModelId,
   onSelectModel,
+  modes,
+  selectedModeId,
+  onSelectMode,
   files = [],
   onAddFiles,
   onRemoveFile
@@ -167,6 +173,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
             models={models}
             selectedModelId={selectedModelId}
             onSelectModel={onSelectModel}
+            modes={modes}
+            selectedModeId={selectedModeId}
+            onSelectMode={onSelectMode}
             files={files}
             onAddFiles={onAddFiles}
             onRemoveFile={onRemoveFile}

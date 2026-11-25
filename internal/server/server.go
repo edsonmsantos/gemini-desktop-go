@@ -304,6 +304,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)
 	s.mux.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
 	s.mux.HandleFunc("PATCH /api/conversations/{id}", s.handlePatchConversation)
+	s.mux.HandleFunc("GET /api/conversations/{id}/capabilities", s.handleConversationCapabilities)
+	s.mux.HandleFunc("POST /api/conversations/{id}/mode", s.handleConversationMode)
 	s.mux.HandleFunc("POST /api/conversations/{id}/prompt", s.handleConversationPrompt)
 	s.mux.HandleFunc("POST /api/conversations/{id}/resume", s.handleConversationResume)
 
@@ -339,17 +341,23 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type response struct {
-		Email *string `json:"email"`
+		Email *string       `json:"email"`
+		Tier  *acp.TierInfo `json:"tier"`
+	}
+
+	var tier *acp.TierInfo
+	if s.client != nil {
+		tier = s.client.LatestTier()
 	}
 
 	if path == "" {
-		_ = json.NewEncoder(w).Encode(response{Email: nil})
+		_ = json.NewEncoder(w).Encode(response{Email: nil, Tier: tier})
 		return
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(response{Email: nil})
+		_ = json.NewEncoder(w).Encode(response{Email: nil, Tier: tier})
 		return
 	}
 
@@ -357,12 +365,12 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
 		Active string `json:"active"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil || strings.TrimSpace(parsed.Active) == "" {
-		_ = json.NewEncoder(w).Encode(response{Email: nil})
+		_ = json.NewEncoder(w).Encode(response{Email: nil, Tier: tier})
 		return
 	}
 
 	email := strings.TrimSpace(parsed.Active)
-	_ = json.NewEncoder(w).Encode(response{Email: &email})
+	_ = json.NewEncoder(w).Encode(response{Email: &email, Tier: tier})
 }
 
 // GET /api/models
@@ -390,11 +398,12 @@ func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(wsList)
 }
 
-// POST /api/conversations {cwd, modelId?}
+// POST /api/conversations {cwd, modelId?, modeId?}
 func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		CWD     string `json:"cwd"`
 		ModelID string `json:"modelId"`
+		ModeID  string `json:"modeId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -438,12 +447,16 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	if req.ModelID != "" {
 		_ = s.client.SetModel(ctx, sessID, req.ModelID)
 	}
+	if req.ModeID != "" {
+		_ = s.client.SetMode(ctx, sessID, req.ModeID)
+	}
 
 	conv := &store.Conversation{
 		ID:           convID,
 		Title:        "",
 		Agent:        "acp",
 		ModelID:      req.ModelID,
+		ModeID:       req.ModeID,
 		CWD:          cwd,
 		ACPSessionID: sessID,
 	}
@@ -475,6 +488,7 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 		"sessionId": sessID,
 		"cwd":       cwd,
 		"modelId":   req.ModelID,
+		"modeId":    req.ModeID,
 	})
 }
 
@@ -606,6 +620,111 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// GET /api/conversations/{id}/capabilities
+func (s *Server) handleConversationCapabilities(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.store == nil {
+		http.Error(w, "store não configurado", http.StatusInternalServerError)
+		return
+	}
+
+	conv, err := s.store.GetConversation(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	s.convMu.Lock()
+	isOrphan := s.orphanSessions[conv.ACPSessionID] || conv.ACPSessionID == ""
+	s.convMu.Unlock()
+
+	if isOrphan {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "sessão inativa ou órfã",
+		})
+		return
+	}
+
+	caps, ok := s.client.SessionCapabilities(conv.ACPSessionID)
+	if !ok {
+		caps = acp.SessionCaps{}
+	}
+
+	configOptions := caps.ConfigOptions
+	if configOptions == nil {
+		configOptions = []acp.ConfigOption{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"modes":         caps.Modes,
+		"tier":          caps.Tier,
+		"configOptions": configOptions,
+	})
+}
+
+// POST /api/conversations/{id}/mode {modeId}
+func (s *Server) handleConversationMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.store == nil {
+		http.Error(w, "store não configurado", http.StatusInternalServerError)
+		return
+	}
+
+	var req struct {
+		ModeID string `json:"modeId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.ModeID) == "" {
+		http.Error(w, "modeId é obrigatório", http.StatusBadRequest)
+		return
+	}
+
+	conv, err := s.store.GetConversation(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	sessID, err := s.ensureActiveSession(ctx, conv)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = s.client.SetMode(ctx, sessID, req.ModeID)
+	if errors.Is(err, acp.ErrModeNotSupported) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotImplemented)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "agente não suporta troca de modo",
+		})
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if s.store != nil {
+		_ = s.store.UpdateConversationMode(id, req.ModeID)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"modeId": req.ModeID,
+	})
 }
 
 // POST /api/conversations/{id}/prompt {text, files?}

@@ -19,6 +19,7 @@ type Conversation struct {
 	Title        string `json:"title"`
 	Agent        string `json:"agent"`
 	ModelID      string `json:"modelId"`
+	ModeID       string `json:"modeId,omitempty"`
 	CWD          string `json:"cwd"`
 	ACPSessionID string `json:"sessionId"`
 	CreatedAt    int64  `json:"createdAt"`
@@ -95,6 +96,7 @@ func (s *Store) migrate() error {
 			title TEXT,
 			agent TEXT,
 			model_id TEXT,
+			mode_id TEXT,
 			cwd TEXT,
 			acp_session_id TEXT,
 			created_at INTEGER,
@@ -124,6 +126,48 @@ func (s *Store) migrate() error {
 		}
 	}
 
+	var currentVersion int
+	err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&currentVersion)
+	if err != nil {
+		currentVersion = 0
+	}
+
+	if currentVersion < 1 {
+		_, _ = s.db.Exec(`INSERT INTO schema_version (version) VALUES (1);`)
+		currentVersion = 1
+	}
+
+	if currentVersion < 2 {
+		// Garante que a coluna mode_id exista se a tabela conversations veio de versão anterior
+		hasModeCol := false
+		rows, err := s.db.Query(`PRAGMA table_info(conversations);`)
+		if err == nil {
+			for rows.Next() {
+				var cid int
+				var name, ctype string
+				var notnull, pk int
+				var dfltValue sql.NullString
+				if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err == nil {
+					if name == "mode_id" {
+						hasModeCol = true
+						break
+					}
+				}
+			}
+			rows.Close()
+		}
+
+		if !hasModeCol {
+			if _, err := s.db.Exec(`ALTER TABLE conversations ADD COLUMN mode_id TEXT;`); err != nil {
+				return fmt.Errorf("falha ao adicionar coluna mode_id: %w", err)
+			}
+		}
+
+		if _, err := s.db.Exec(`INSERT INTO schema_version (version) VALUES (2);`); err != nil {
+			return fmt.Errorf("falha ao atualizar schema_version: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -147,9 +191,9 @@ func (s *Store) CreateConversation(c *Conversation) error {
 		c.UpdatedAt = now
 	}
 
-	query := `INSERT INTO conversations (id, title, agent, model_id, cwd, acp_session_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := s.db.Exec(query, c.ID, c.Title, c.Agent, c.ModelID, c.CWD, c.ACPSessionID, c.CreatedAt, c.UpdatedAt)
+	query := `INSERT INTO conversations (id, title, agent, model_id, mode_id, cwd, acp_session_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query, c.ID, c.Title, c.Agent, c.ModelID, c.ModeID, c.CWD, c.ACPSessionID, c.CreatedAt, c.UpdatedAt)
 	return err
 }
 
@@ -158,12 +202,12 @@ func (s *Store) GetConversation(id string) (*Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `SELECT id, title, agent, model_id, cwd, acp_session_id, created_at, updated_at
+	query := `SELECT id, title, agent, model_id, COALESCE(mode_id, ''), cwd, acp_session_id, created_at, updated_at
 		FROM conversations WHERE id = ?`
 	row := s.db.QueryRow(query, id)
 
 	var c Conversation
-	err := row.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.ModeID, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("conversa %s não encontrada", id)
 	}
@@ -178,7 +222,7 @@ func (s *Store) ListConversations() ([]*Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `SELECT id, title, agent, model_id, cwd, acp_session_id, created_at, updated_at
+	query := `SELECT id, title, agent, model_id, COALESCE(mode_id, ''), cwd, acp_session_id, created_at, updated_at
 		FROM conversations ORDER BY updated_at DESC`
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -189,7 +233,7 @@ func (s *Store) ListConversations() ([]*Conversation, error) {
 	var list []*Conversation
 	for rows.Next() {
 		var c Conversation
-		if err := rows.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.ModeID, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, &c)
@@ -216,6 +260,17 @@ func (s *Store) UpdateConversationModel(id, modelID string) error {
 	now := time.Now().UnixMilli()
 	query := `UPDATE conversations SET model_id = ?, updated_at = ? WHERE id = ?`
 	_, err := s.db.Exec(query, modelID, now, id)
+	return err
+}
+
+// UpdateConversationMode altera o modo de operação da conversa
+func (s *Store) UpdateConversationMode(id, modeID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UnixMilli()
+	query := `UPDATE conversations SET mode_id = ?, updated_at = ? WHERE id = ?`
+	_, err := s.db.Exec(query, modeID, now, id)
 	return err
 }
 

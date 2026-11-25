@@ -22,6 +22,7 @@ func TestStore_MigrationsAndCRUD(t *testing.T) {
 		Title:        "Nova Conversa",
 		Agent:        "agy",
 		ModelID:      "gemini-2.5-flash",
+		ModeID:       "default",
 		CWD:          tmpDir,
 		ACPSessionID: "sess-123",
 		CreatedAt:    time.Now().UnixMilli(),
@@ -36,19 +37,22 @@ func TestStore_MigrationsAndCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("falha ao buscar conversa: %v", err)
 	}
-	if got.Title != "Nova Conversa" || got.ModelID != "gemini-2.5-flash" {
+	if got.Title != "Nova Conversa" || got.ModelID != "gemini-2.5-flash" || got.ModeID != "default" {
 		t.Fatalf("conversa recuperada incorreta: %+v", got)
 	}
 
-	// 3. Atualizar título e modelo
+	// 3. Atualizar título, modelo e modo
 	if err := st.UpdateConversationTitle("conv-1", "Título Atualizado"); err != nil {
 		t.Fatalf("falha ao atualizar título: %v", err)
 	}
 	if err := st.UpdateConversationModel("conv-1", "gemini-2.5-pro"); err != nil {
 		t.Fatalf("falha ao atualizar modelo: %v", err)
 	}
+	if err := st.UpdateConversationMode("conv-1", "accept-edits"); err != nil {
+		t.Fatalf("falha ao atualizar modo: %v", err)
+	}
 	got, _ = st.GetConversation("conv-1")
-	if got.Title != "Título Atualizado" || got.ModelID != "gemini-2.5-pro" {
+	if got.Title != "Título Atualizado" || got.ModelID != "gemini-2.5-pro" || got.ModeID != "accept-edits" {
 		t.Fatalf("dados não atualizados: %+v", got)
 	}
 
@@ -130,5 +134,47 @@ func TestStore_MigrationsAndCRUD(t *testing.T) {
 	msgsAfter, _ := st.GetMessages("conv-1")
 	if len(msgsAfter) != 0 {
 		t.Fatalf("esperava 0 mensagens após deletar conversa, obteve %d", len(msgsAfter))
+	}
+}
+
+func TestStore_ModeIdMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "migration_test.db")
+
+	// 1. Simula banco legado (v1) sem coluna mode_id
+	db, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("falha ao inicializar store: %v", err)
+	}
+	db.Close()
+
+	// 2. Reabre store (deve rodar migration se necessário)
+	st, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("falha ao reabrir store com migration: %v", err)
+	}
+	defer st.Close()
+
+	conv := &Conversation{
+		ID:           "conv-migrated",
+		Title:        "Conversa Migrada",
+		Agent:        "agy",
+		ModelID:      "gemini-2.5-flash",
+		ModeID:       "accept-edits",
+		CWD:          tmpDir,
+		ACPSessionID: "sess-migrated",
+		CreatedAt:    time.Now().UnixMilli(),
+		UpdatedAt:    time.Now().UnixMilli(),
+	}
+	if err := st.CreateConversation(conv); err != nil {
+		t.Fatalf("falha ao inserir conversa após migration: %v", err)
+	}
+
+	got, err := st.GetConversation("conv-migrated")
+	if err != nil {
+		t.Fatalf("falha ao obter conversa: %v", err)
+	}
+	if got.ModeID != "accept-edits" {
+		t.Fatalf("esperava modeId 'accept-edits', obteve %q", got.ModeID)
 	}
 }

@@ -1,6 +1,6 @@
 import React from 'react'
 import { PromptBar } from './PromptBar'
-import { Model } from '../types'
+import { Model, ModesInfo } from '../types'
 
 interface WelcomeViewProps {
   prompt: string
@@ -10,6 +10,9 @@ interface WelcomeViewProps {
   models: Model[]
   selectedModelId: string
   onSelectModel: (id: string) => void
+  modes?: ModesInfo | null
+  selectedModeId?: string
+  onSelectMode?: (id: string) => void
   onCancel: () => void
   files?: string[]
   onAddFiles?: (files: string[]) => void
@@ -24,6 +27,9 @@ export const WelcomeView: React.FC<WelcomeViewProps> = ({
   models,
   selectedModelId,
   onSelectModel,
+  modes,
+  selectedModeId,
+  onSelectMode,
   onCancel,
   files = [],
   onAddFiles,
@@ -92,6 +98,9 @@ export const WelcomeView: React.FC<WelcomeViewProps> = ({
             models={models}
             selectedModelId={selectedModelId}
             onSelectModel={onSelectModel}
+            modes={modes}
+            selectedModeId={selectedModeId}
+            onSelectMode={onSelectMode}
             files={files}
             onAddFiles={onAddFiles}
             onRemoveFile={onRemoveFile}

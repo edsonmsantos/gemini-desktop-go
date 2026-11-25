@@ -89,6 +89,20 @@ export const AgentFooter: React.FC<AgentFooterProps> = ({
             >
               {email}
             </span>
+            {agentInfo?.tier?.name && (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: 'var(--text-muted)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  marginTop: 1
+                }}
+              >
+                {agentInfo.tier.name}
+              </span>
+            )}
           </div>
         </div>
       )}

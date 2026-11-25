@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react'
 import { MicIcon, PlusIcon, SendIcon, StopIcon, FileIcon, CloseIcon } from './icons'
 import { ModelSelect } from './ModelSelect'
-import { Model } from '../types'
+import { ModeSelect } from './ModeSelect'
+import { Model, ModesInfo } from '../types'
 import { selectFilesViaWails } from '../api'
 
 interface PromptBarProps {
@@ -13,6 +14,9 @@ interface PromptBarProps {
   models: Model[]
   selectedModelId: string
   onSelectModel: (id: string) => void
+  modes?: ModesInfo | null
+  selectedModeId?: string
+  onSelectMode?: (id: string) => void
   files?: string[]
   onAddFiles?: (files: string[]) => void
   onRemoveFile?: (index: number) => void
@@ -33,6 +37,9 @@ export const PromptBar: React.FC<PromptBarProps> = ({
   models,
   selectedModelId,
   onSelectModel,
+  modes,
+  selectedModeId,
+  onSelectMode,
   files = [],
   onAddFiles,
   onRemoveFile,
@@ -257,13 +264,23 @@ export const PromptBar: React.FC<PromptBarProps> = ({
           paddingLeft: 38
         }}
       >
-        {/* Dropdown de Modelos à direita/esquerda na barra */}
-        <ModelSelect
-          models={models}
-          selectedModelId={selectedModelId}
-          onSelectModel={onSelectModel}
-          disabled={isStreaming}
-        />
+        {/* Dropdowns de Modelo e Modo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ModelSelect
+            models={models}
+            selectedModelId={selectedModelId}
+            onSelectModel={onSelectModel}
+            disabled={isStreaming}
+          />
+          {modes && onSelectMode && (
+            <ModeSelect
+              modes={modes}
+              selectedModeId={selectedModeId}
+              onSelectMode={onSelectMode}
+              disabled={isStreaming}
+            />
+          )}
+        </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Microfone desabilitado */}

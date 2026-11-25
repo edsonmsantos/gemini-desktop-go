@@ -60,10 +60,50 @@ type InitializeResult struct {
 	AuthMethods     []AuthMethod           `json:"authMethods,omitempty"`
 }
 
+// ModeInfo descreve um modo de operação do agente (ex: default, accept-edits)
+type ModeInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// ModesInfo agrega o modo atual e os modos disponíveis na sessão
+type ModesInfo struct {
+	CurrentModeID  string     `json:"currentModeId"`
+	Current        string     `json:"current,omitempty"`
+	AvailableModes []ModeInfo `json:"availableModes"`
+}
+
+// ConfigOption descreve uma opção de configuração anunciada pelo agente
+type ConfigOption struct {
+	ID           string                   `json:"id"`
+	Name         string                   `json:"name"`
+	Category     string                   `json:"category,omitempty"`
+	Type         string                   `json:"type,omitempty"`
+	CurrentValue interface{}              `json:"currentValue,omitempty"`
+	Options      []map[string]interface{} `json:"options,omitempty"`
+}
+
+// TierInfo descreve o plano/tier associado à conta no agente
+type TierInfo struct {
+	Name       string `json:"name"`
+	ID         string `json:"id,omitempty"`
+	UpgradeURI string `json:"upgradeUri,omitempty"`
+}
+
+// SessionCaps agrega as capacidades anunciadas pelo agente para uma sessão
+type SessionCaps struct {
+	Modes         *ModesInfo     `json:"modes,omitempty"`
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+	Tier          *TierInfo      `json:"tier,omitempty"`
+	CurrentModeID string         `json:"currentModeId,omitempty"`
+}
+
 // Erros tipados para capacidades de sessão
 var (
 	ErrResumeNotSupported = errors.New("agente não suporta retomada de sessão")
 	ErrModelNotSupported  = errors.New("agente não suporta seleção de modelo")
+	ErrModeNotSupported   = errors.New("agente não suporta troca de modo")
 )
 
 type pendingPermission struct {
@@ -91,6 +131,9 @@ type Client struct {
 
 	models      []ModelInfo
 	authMethods []AuthMethod
+
+	sessionCaps map[string]SessionCaps
+	latestTier  *TierInfo
 
 	dead       bool
 	onExitFunc func()
@@ -291,6 +334,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		sessionChans: make(map[string]chan<- Event),
 		errorEmitted: make(map[string]bool),
 		pendingPerms: make(map[string]pendingPermission),
+		sessionCaps:  make(map[string]SessionCaps),
 	}
 
 	c.mu.Lock()
@@ -779,6 +823,13 @@ func (c *Client) doNewSession(ctx context.Context, cwd string) (string, error) {
 			CurrentModelID  string      `json:"currentModelId"`
 			AvailableModels []ModelInfo `json:"availableModels"`
 		} `json:"models"`
+		Modes         *ModesInfo     `json:"modes"`
+		ConfigOptions []ConfigOption `json:"configOptions"`
+		Meta          struct {
+			Antigravity struct {
+				Tier *TierInfo `json:"tier"`
+			} `json:"antigravity"`
+		} `json:"_meta"`
 	}
 	if err := json.Unmarshal(rawRes, &res); err != nil {
 		return "", fmt.Errorf("erro ao parsear resposta de session/new: %w", err)
@@ -801,7 +852,75 @@ func (c *Client) doNewSession(ctx context.Context, cwd string) (string, error) {
 		c.mu.Unlock()
 	}
 
+	caps := SessionCaps{
+		Modes:         res.Modes,
+		ConfigOptions: res.ConfigOptions,
+		Tier:          res.Meta.Antigravity.Tier,
+	}
+	if res.Modes != nil {
+		if res.Modes.Current == "" {
+			res.Modes.Current = res.Modes.CurrentModeID
+		}
+		if res.Modes.CurrentModeID == "" {
+			res.Modes.CurrentModeID = res.Modes.Current
+		}
+		caps.CurrentModeID = res.Modes.CurrentModeID
+	}
+
+	c.mu.Lock()
+	if c.sessionCaps == nil {
+		c.sessionCaps = make(map[string]SessionCaps)
+	}
+	c.sessionCaps[sessID] = caps
+	if caps.Tier != nil {
+		c.latestTier = caps.Tier
+	}
+	c.mu.Unlock()
+
 	return sessID, nil
+}
+
+// SetMode altera o modo de operação ativo na sessão via session/set_mode
+func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) error {
+	params := map[string]string{
+		"sessionId": sessionID,
+		"modeId":    modeID,
+	}
+	_, err := c.framer.Call(ctx, "session/set_mode", params)
+	if err != nil {
+		if strings.Contains(err.Error(), "-32601") || strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return ErrModeNotSupported
+		}
+		return fmt.Errorf("erro em session/set_mode: %w", err)
+	}
+
+	c.mu.Lock()
+	if caps, ok := c.sessionCaps[sessionID]; ok {
+		caps.CurrentModeID = modeID
+		if caps.Modes != nil {
+			caps.Modes.CurrentModeID = modeID
+			caps.Modes.Current = modeID
+		}
+		c.sessionCaps[sessionID] = caps
+	}
+	c.mu.Unlock()
+
+	return nil
+}
+
+// SessionCapabilities retorna as capacidades declaradas para a sessão especificada
+func (c *Client) SessionCapabilities(sessionID string) (SessionCaps, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	caps, ok := c.sessionCaps[sessionID]
+	return caps, ok
+}
+
+// LatestTier retorna o tier mais recente informado pelo agente
+func (c *Client) LatestTier() *TierInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.latestTier
 }
 
 // NewSession cria uma nova sessão no agente ACP com suporte a retry automático via AutoAuth

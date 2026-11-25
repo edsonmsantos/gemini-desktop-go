@@ -10,6 +10,8 @@ import {
   fetchWorkspaces,
   fetchConversations,
   fetchConversation,
+  fetchCapabilities,
+  setConversationMode,
   createConversation,
   patchConversation,
   deleteConversation,
@@ -24,6 +26,7 @@ import {
   Conversation,
   Message,
   Model,
+  ModesInfo,
   PermissionRequest,
   Plan,
   ToolCall,
@@ -46,6 +49,8 @@ export const App: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [activeSessionId, setActiveSessionId] = useState<string>('')
+  const [activeModes, setActiveModes] = useState<ModesInfo | null>(null)
+  const [selectedModeId, setSelectedModeId] = useState<string>('')
   const [processingConversationIds, setProcessingConversationIds] = useState<Set<string>>(new Set())
 
   // Mensagens, Arquivos e Streaming
@@ -297,6 +302,27 @@ export const App: React.FC = () => {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
+  // Carregar capacidades de uma conversa (modes, tier, configOptions)
+  const loadCapabilitiesForConv = useCallback(async (convId: string, fallbackModeId?: string) => {
+    try {
+      const caps = await fetchCapabilities(convId)
+      if (caps.modes) {
+        setActiveModes(caps.modes)
+        const curr = fallbackModeId || caps.modes.currentModeId || caps.modes.current || ''
+        if (curr) {
+          setSelectedModeId(curr)
+        }
+      } else {
+        setActiveModes(null)
+      }
+      if (caps.tier) {
+        setAgentInfo((prev) => prev ? { ...prev, tier: caps.tier } : { email: null, tier: caps.tier })
+      }
+    } catch {
+      setActiveModes(null)
+    }
+  }, [])
+
   // Selecionar conversa existente do histórico
   const handleSelectConversation = async (id: string) => {
     try {
@@ -306,6 +332,9 @@ export const App: React.FC = () => {
       setMessages(data.messages || [])
       if (data.conversation.modelId) {
         setSelectedModelId(data.conversation.modelId)
+      }
+      if (data.conversation.modeId) {
+        setSelectedModeId(data.conversation.modeId)
       }
       if (data.conversation.cwd) {
         setSelectedCwd(data.conversation.cwd)
@@ -325,6 +354,9 @@ export const App: React.FC = () => {
           setActiveSessionId(res.sessionId)
         }
       }).catch(() => {})
+
+      // Buscar capabilities (modes, tier)
+      loadCapabilitiesForConv(id, data.conversation.modeId)
     } catch {
       // ignore
     }
@@ -333,7 +365,7 @@ export const App: React.FC = () => {
   // Confirmar criação de nova conversa via Modal de Nova Conversa
   const handleConfirmNewConversation = async (cwd?: string) => {
     try {
-      const newConv = await createConversation(cwd, selectedModelId)
+      const newConv = await createConversation(cwd, selectedModelId, selectedModeId || undefined)
       setActiveConversationId(newConv.id)
       setActiveSessionId(newConv.sessionId)
       if (newConv.cwd) {
@@ -349,10 +381,12 @@ export const App: React.FC = () => {
       setPrompt('')
       setAttachedFiles([])
       fetchConversations().then(setConversations).catch(() => {})
+      loadCapabilitiesForConv(newConv.id, newConv.modeId)
     } catch {
       // Se falhar, reseta para welcome view
       setActiveConversationId(null)
       setActiveSessionId('')
+      setActiveModes(null)
       setMessages([])
     }
   }
@@ -376,6 +410,8 @@ export const App: React.FC = () => {
       if (activeConversationId === id) {
         setActiveConversationId(null)
         setActiveSessionId('')
+        setActiveModes(null)
+        setSelectedModeId('')
         setMessages([])
         setPrompt('')
         setAttachedFiles([])
@@ -413,6 +449,19 @@ export const App: React.FC = () => {
     }
   }
 
+  // Alterar modo de operação
+  const handleSelectMode = async (modeId: string) => {
+    setSelectedModeId(modeId)
+    if (activeConversationId) {
+      try {
+        await setConversationMode(activeConversationId, modeId)
+        setActiveModes((prev) => prev ? { ...prev, currentModeId: modeId, current: modeId } : null)
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   // Enviar prompt
   const handleSendPrompt = async () => {
     const text = prompt.trim()
@@ -427,7 +476,7 @@ export const App: React.FC = () => {
     try {
       // Se não houver conversa ativa, cria uma nova
       if (!convId) {
-        const newConv = await createConversation(selectedCwd || undefined, selectedModelId)
+        const newConv = await createConversation(selectedCwd || undefined, selectedModelId, selectedModeId || undefined)
         convId = newConv.id
         setActiveConversationId(newConv.id)
         setActiveSessionId(newConv.sessionId)
@@ -435,6 +484,7 @@ export const App: React.FC = () => {
           setSelectedCwd(newConv.cwd)
         }
         fetchConversations().then(setConversations).catch(() => {})
+        loadCapabilitiesForConv(newConv.id, newConv.modeId)
       }
 
       // Adiciona convId ao conjunto de processamento
@@ -562,6 +612,9 @@ export const App: React.FC = () => {
             models={models}
             selectedModelId={selectedModelId}
             onSelectModel={handleSelectModel}
+            modes={activeModes}
+            selectedModeId={selectedModeId}
+            onSelectMode={handleSelectMode}
             files={attachedFiles}
             onAddFiles={handleAddFiles}
             onRemoveFile={handleRemoveFile}
@@ -583,6 +636,9 @@ export const App: React.FC = () => {
             models={models}
             selectedModelId={selectedModelId}
             onSelectModel={handleSelectModel}
+            modes={activeModes}
+            selectedModeId={selectedModeId}
+            onSelectMode={handleSelectMode}
             files={attachedFiles}
             onAddFiles={handleAddFiles}
             onRemoveFile={handleRemoveFile}

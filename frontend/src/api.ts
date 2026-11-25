@@ -1,4 +1,4 @@
-import { AgentInfo, Conversation, Message, Model, Workspace, WSEvent } from './types'
+import { AgentInfo, CapabilitiesResponse, Conversation, Message, Model, Workspace, WSEvent } from './types'
 
 declare global {
   interface Window {
@@ -82,16 +82,18 @@ export async function fetchConversation(id: string): Promise<{ conversation: Con
   return res.json()
 }
 
-export async function createConversation(cwd?: string, modelId?: string): Promise<{
+export async function createConversation(cwd?: string, modelId?: string, modeId?: string): Promise<{
   id: string
   title: string
   sessionId: string
   cwd: string
   modelId: string
+  modeId?: string
 }> {
   const payload: Record<string, string> = {}
   if (cwd) payload.cwd = cwd
   if (modelId) payload.modelId = modelId
+  if (modeId) payload.modeId = modeId
 
   const res = await fetch(`${getBaseURL()}/api/conversations`, {
     method: 'POST',
@@ -101,6 +103,27 @@ export async function createConversation(cwd?: string, modelId?: string): Promis
   if (!res.ok) {
     const errText = await res.text()
     throw new Error(errText || 'Falha ao criar conversa')
+  }
+  return res.json()
+}
+
+export async function fetchCapabilities(conversationId: string): Promise<CapabilitiesResponse> {
+  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(conversationId)}/capabilities`)
+  if (!res.ok) {
+    return { modes: null, tier: null, configOptions: [] }
+  }
+  return res.json()
+}
+
+export async function setConversationMode(conversationId: string, modeId: string): Promise<{ status: string; modeId: string }> {
+  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(conversationId)}/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modeId })
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(errText || 'Falha ao alterar modo da conversa')
   }
   return res.json()
 }

@@ -35,6 +35,7 @@ export interface Conversation {
   title: string
   agent: string
   modelId: string
+  modeId?: string
   cwd: string
   sessionId: string
   createdAt: number
@@ -63,8 +64,43 @@ export interface Model {
   isDefault?: boolean
 }
 
+export interface ModeInfo {
+  id: string
+  name: string
+  description?: string
+}
+
+export interface ModesInfo {
+  currentModeId?: string
+  current?: string
+  availableModes?: ModeInfo[]
+  available?: ModeInfo[]
+}
+
+export interface TierInfo {
+  name: string
+  id?: string
+  upgradeUri?: string
+}
+
+export interface ConfigOption {
+  id: string
+  name: string
+  category?: string
+  type?: string
+  currentValue?: unknown
+  options?: Array<Record<string, unknown>>
+}
+
+export interface CapabilitiesResponse {
+  modes?: ModesInfo | null
+  tier?: TierInfo | null
+  configOptions?: ConfigOption[]
+}
+
 export interface AgentInfo {
   email: string | null
+  tier?: TierInfo | null
 }
 
 export interface WSEvent {

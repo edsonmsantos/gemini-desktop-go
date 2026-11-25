@@ -148,6 +148,35 @@ func main() {
 						{"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
 					},
 				},
+				"modes": map[string]interface{}{
+					"currentModeId": "default",
+					"availableModes": []map[string]string{
+						{"id": "default", "name": "Default", "description": "Ask before edits and commands"},
+						{"id": "accept-edits", "name": "Accept edits", "description": "Auto accept edits"},
+						{"id": "plan-only", "name": "Plan only", "description": "Only plan without edits"},
+					},
+				},
+				"configOptions": []map[string]interface{}{
+					{
+						"id":           "model",
+						"name":         "Model",
+						"category":     "model",
+						"type":         "select",
+						"currentValue": "gemini-2.5-flash",
+						"options": []map[string]string{
+							{"value": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
+						},
+					},
+				},
+				"_meta": map[string]interface{}{
+					"antigravity": map[string]interface{}{
+						"tier": map[string]string{
+							"name":       "Google AI Pro",
+							"id":         "g1-pro-tier",
+							"upgradeUri": "https://one.google.com/explore-plan",
+						},
+					},
+				},
 			})
 
 		case "session/load":
@@ -162,6 +191,18 @@ func main() {
 			sendResponse(*req.ID, map[string]interface{}{
 				"sessionId": params.SessionID,
 			})
+
+		case "session/set_mode":
+			var params struct {
+				SessionID string `json:"sessionId"`
+				ModeID    string `json:"modeId"`
+			}
+			_ = json.Unmarshal(req.Params, &params)
+			if strings.Contains(params.ModeID, "trigger-32601") || strings.Contains(params.SessionID, "trigger-32601") {
+				sendError(*req.ID, -32601, "Method not found: session/set_mode")
+				continue
+			}
+			sendResponse(*req.ID, map[string]interface{}{})
 
 		case "session/set_model":
 			var params struct {
