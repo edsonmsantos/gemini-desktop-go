@@ -169,3 +169,11 @@ textarea, input {
 .msg-row:hover .msg-action-row {
   opacity: 1 !important;
 }
+
+/* Conteúdo de mensagens: texto selecionável e copiável (Ctrl+C funciona;
+   o resto da UI continua com user-select:none do body) */
+.selectable,
+.selectable * {
+  user-select: text;
+  -webkit-user-select: text;
+}

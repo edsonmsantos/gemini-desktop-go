@@ -291,6 +291,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </button>
         )}
         <div
+          className="selectable"
           style={{
             maxWidth: '75%',
             padding: '12px 18px',
@@ -400,6 +401,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       <div style={{ flex: 1, minWidth: 0 }}>
         {isErr && errInfo ? (
           <div
+            className="selectable"
             style={{
               padding: '10px 14px',
               borderRadius: 8,
@@ -435,7 +437,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
           </div>
         ) : (
-          <MarkdownRenderer content={message.content} />
+          <div className="selectable">
+            <MarkdownRenderer content={message.content} />
+          </div>
         )}
 
         {/* Ações da resposta: copiar, PDF, fontes e regenerar (última) */}
@@ -469,6 +473,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
             {showSources && sources.length > 0 && (
               <div
+                className="selectable"
                 style={{
                   marginTop: 8,
                   padding: '10px 12px',

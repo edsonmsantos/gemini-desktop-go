@@ -51,6 +51,7 @@ export const ThinkingBlock: React.FC<ThinkingBlockProps> = ({ thinking, isStream
 
       {isOpen && (
         <div
+          className="selectable"
           style={{
             padding: '10px 14px',
             borderTop: '1px solid var(--border-subtle)',

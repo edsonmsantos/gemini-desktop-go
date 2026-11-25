@@ -105,6 +105,7 @@ export const ToolCallCard: React.FC<ToolCallCardProps> = ({ toolCall }) => {
       case 'command': {
         return (
           <div
+            className="selectable"
             style={{
               marginTop: 6,
               borderRadius: 8,
