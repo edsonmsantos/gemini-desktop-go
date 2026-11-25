@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"testing"
 
@@ -14,6 +15,11 @@ import (
 func TestSmoke_RealMCP(t *testing.T) {
 	if testing.Short() {
 		t.Skip("pulando teste smoke real com agy em modo short")
+	}
+	// Depende dos servidores MCP específicos do host (ex.: blender, gsc, reddit).
+	// Só roda explicitamente: MCP_SMOKE=1 go test ./internal/server/
+	if os.Getenv("MCP_SMOKE") != "1" {
+		t.Skip("teste smoke real de MCP requer MCP_SMOKE=1 (depende do estado do agy neste host)")
 	}
 
 	_, err := exec.LookPath("agy")

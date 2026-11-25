@@ -178,3 +178,100 @@ func TestStore_ModeIdMigration(t *testing.T) {
 		t.Fatalf("esperava modeId 'accept-edits', obteve %q", got.ModeID)
 	}
 }
+
+// TestStore_EmptyLists_NaoNulo garante que listagens em banco vazio retornam
+// slices vazios (serializados como [] pelo JSON) e nunca null — causa de
+// crash do frontend ("null is not an object") na primeira execução.
+func TestStore_EmptyLists_NaoNulo(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "empty.db")
+
+	st, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("falha ao abrir store: %v", err)
+	}
+	defer st.Close()
+
+	convs, err := st.ListConversations()
+	if err != nil {
+		t.Fatalf("falha ao listar conversas: %v", err)
+	}
+	if convs == nil || len(convs) != 0 {
+		t.Fatalf("ListConversations deveria retornar slice vazio não-nulo, obteve %v", convs)
+	}
+
+	ws, err := st.ListWorkspaces(10)
+	if err != nil {
+		t.Fatalf("falha ao listar workspaces: %v", err)
+	}
+	if ws == nil || len(ws) != 0 {
+		t.Fatalf("ListWorkspaces deveria retornar slice vazio não-nulo, obteve %v", ws)
+	}
+
+	res, err := st.Search("qualquer-coisa", 10)
+	if err != nil {
+		t.Fatalf("falha ao buscar: %v", err)
+	}
+	if res == nil || len(res) != 0 {
+		t.Fatalf("Search deveria retornar slice vazio não-nulo, obteve %v", res)
+	}
+
+	// Mensagens de conversa inexistente também devem vir vazias, não nulas
+	msgs, err := st.GetMessages("conv-inexistente")
+	if err != nil {
+		t.Fatalf("falha ao listar mensagens: %v", err)
+	}
+	if msgs == nil || len(msgs) != 0 {
+		t.Fatalf("GetMessages deveria retornar slice vazio não-nulo, obteve %v", msgs)
+	}
+}
+
+// TestStore_DeleteMessagesFrom valida o truncamento usado por regenerar/editar
+func TestStore_DeleteMessagesFrom(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "trunc.db")
+
+	st, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("falha ao abrir store: %v", err)
+	}
+	defer st.Close()
+
+	conv := &Conversation{
+		ID: "conv-trunc", Title: "Trunc", Agent: "agy", ModelID: "m",
+		CWD: tmpDir, ACPSessionID: "s", CreatedAt: 1, UpdatedAt: 1,
+	}
+	if err := st.CreateConversation(conv); err != nil {
+		t.Fatalf("falha ao criar conversa: %v", err)
+	}
+
+	// user, assistant, user, assistant
+	for _, role := range []string{"user", "assistant", "user", "assistant"} {
+		if err := st.AppendMessage(&Message{ConversationID: "conv-trunc", Role: role, Content: role + "-msg", CreatedAt: 1}); err != nil {
+			t.Fatalf("falha ao inserir mensagem: %v", err)
+		}
+	}
+
+	msgs, _ := st.GetMessages("conv-trunc")
+	if len(msgs) != 4 {
+		t.Fatalf("esperava 4 mensagens, obteve %d", len(msgs))
+	}
+
+	// Trunca a partir do 3º (segundo user): restam só 2
+	if err := st.DeleteMessagesFrom("conv-trunc", msgs[2].Seq); err != nil {
+		t.Fatalf("falha ao truncar: %v", err)
+	}
+	msgs, _ = st.GetMessages("conv-trunc")
+	if len(msgs) != 2 || msgs[0].Role != "user" || msgs[1].Role != "assistant" {
+		t.Fatalf("esperava 2 mensagens após truncar, obteve %d: %+v", len(msgs), msgs)
+	}
+
+	// Trunca tudo
+	if err := st.DeleteMessagesFrom("conv-trunc", 0); err != nil {
+		t.Fatalf("falha ao truncar tudo: %v", err)
+	}
+	msgs, _ = st.GetMessages("conv-trunc")
+	if len(msgs) != 0 {
+		t.Fatalf("esperava 0 mensagens, obteve %d", len(msgs))
+	}
+}

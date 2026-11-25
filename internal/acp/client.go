@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -118,6 +119,7 @@ type Client struct {
 	cmd     *exec.Cmd
 	framer  *Framer
 	logFile *os.File
+	exitCh  chan struct{} // fechado quando o cmd atual termina (fecha após cmd.Wait da goroutine de spawn)
 
 	mu sync.Mutex
 
@@ -279,10 +281,15 @@ func (c *Client) startProcessLocked() error {
 	c.framer = framer
 	c.dead = false
 
-	go func(curCmd *exec.Cmd) {
+	// exitCh permite que Close/restart aguardem o término SEM chamar cmd.Wait()
+	// de novo (os/exec não tolera Wait concorrente — data race documentado).
+	exitCh := make(chan struct{})
+	c.exitCh = exitCh
+	go func(curCmd *exec.Cmd, ch chan struct{}) {
 		_ = curCmd.Wait()
+		close(ch)
 		c.handleProcessExit(curCmd)
-	}(cmd)
+	}(cmd, exitCh)
 
 	return nil
 }
@@ -600,10 +607,14 @@ func (c *Client) emitEvent(ev Event) {
 	}
 
 	if ch != nil {
+		// Envia com backoff limitado: descartar chunks corromperia a resposta
+		// persistida no SQLite. O consumidor é a goroutine do turno, que está
+		// sempre drenando enquanto o framer lê — 5s é folga segura contra
+		// travamento permanente.
 		select {
 		case ch <- ev:
-		default:
-			// Não bloqueia caso o canal esteja cheio
+		case <-time.After(5 * time.Second):
+			log.Printf("[aviso] evento %s descartado: consumidor da sessão não drenou em 5s", ev.Type)
 		}
 	}
 }
@@ -621,6 +632,8 @@ func (c *Client) doInitialize(ctx context.Context) (*InitializeResult, error) {
 		},
 	}
 
+	// NOTA: doInitialize roda sempre sob c.mu (Initialize/restartLocked) —
+	// acesso direto a c.framer é seguro aqui; getFramer() causaria self-deadlock.
 	rawRes, err := c.framer.Call(reqCtx, "initialize", params)
 	if err != nil {
 		return nil, fmt.Errorf("erro no handshake initialize: %w", err)
@@ -686,6 +699,8 @@ func (c *Client) doAuthenticate(ctx context.Context, methodID string) error {
 		"methodId": methodID,
 	}
 
+	// NOTA: doAuthenticate roda sempre sob c.mu (Authenticate/doInitialize) —
+	// acesso direto seguro; getFramer() causaria self-deadlock.
 	_, err := c.framer.Call(ctx, "authenticate", params)
 	if err != nil {
 		return fmt.Errorf("falha ao autenticar com methodId %s: %w", methodID, err)
@@ -774,13 +789,28 @@ func (c *Client) Restart(ctx context.Context) error {
 	return c.restartLocked(ctx)
 }
 
+// getFramer retorna um snapshot do framer atual sob lock. Evita race/nil-panic
+// com Close() (que zera c.framer): o chamador usa o snapshot local; o Framer é
+// internamente seguro para uso concorrente com Close (canais pending fechados).
+func (c *Client) getFramer() *Framer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.framer
+}
+
 func (c *Client) restartLocked(ctx context.Context) error {
 	if c.framer != nil {
 		_ = c.framer.Close()
 	}
 	if c.cmd != nil && c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
-		_ = c.cmd.Wait()
+		// Aguarda a goroutine de spawn reaped o processo (exitCh fecha após Wait)
+		if c.exitCh != nil {
+			select {
+			case <-c.exitCh:
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
 	}
 
 	if err := c.startProcessLocked(); err != nil {
@@ -811,7 +841,11 @@ func (c *Client) doNewSession(ctx context.Context, cwd string) (string, error) {
 		"mcpServers": []interface{}{},
 	}
 
-	rawRes, err := c.framer.Call(ctx, "session/new", params)
+	framer := c.getFramer()
+	if framer == nil {
+		return "", errors.New("cliente ACP encerrado")
+	}
+	rawRes, err := framer.Call(ctx, "session/new", params)
 	if err != nil {
 		return "", err
 	}
@@ -886,7 +920,11 @@ func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) error {
 		"sessionId": sessionID,
 		"modeId":    modeID,
 	}
-	_, err := c.framer.Call(ctx, "session/set_mode", params)
+	framer := c.getFramer()
+	if framer == nil {
+		return errors.New("cliente ACP encerrado")
+	}
+	_, err := framer.Call(ctx, "session/set_mode", params)
 	if err != nil {
 		if strings.Contains(err.Error(), "-32601") || strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return ErrModeNotSupported
@@ -959,7 +997,11 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string) error {
 	params := map[string]string{
 		"sessionId": sessionID,
 	}
-	_, err := c.framer.Call(ctx, "session/load", params)
+	framer := c.getFramer()
+	if framer == nil {
+		return errors.New("cliente ACP encerrado")
+	}
+	_, err := framer.Call(ctx, "session/load", params)
 	if err != nil {
 		if strings.Contains(err.Error(), "-32601") || strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return ErrResumeNotSupported
@@ -975,7 +1017,11 @@ func (c *Client) SetModel(ctx context.Context, sessionID, modelID string) error 
 		"sessionId": sessionID,
 		"modelId":   modelID,
 	}
-	_, err := c.framer.Call(ctx, "session/set_model", params)
+	framer := c.getFramer()
+	if framer == nil {
+		return errors.New("cliente ACP encerrado")
+	}
+	_, err := framer.Call(ctx, "session/set_model", params)
 	if err != nil {
 		if strings.Contains(err.Error(), "-32601") || strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return ErrModelNotSupported
@@ -990,7 +1036,9 @@ func (c *Client) CloseSession(ctx context.Context, sessionID string) error {
 	params := map[string]string{
 		"sessionId": sessionID,
 	}
-	_, _ = c.framer.Call(ctx, "session/close", params)
+	if framer := c.getFramer(); framer != nil {
+		_, _ = framer.Call(ctx, "session/close", params)
+	}
 	return nil
 }
 
@@ -1020,7 +1068,11 @@ func (c *Client) PromptSessionWithContent(ctx context.Context, sessionID string,
 		"prompt":    content,
 	}
 
-	rawRes, err := c.framer.Call(ctx, "session/prompt", params)
+	framer := c.getFramer()
+	if framer == nil {
+		return errors.New("cliente ACP encerrado")
+	}
+	rawRes, err := framer.Call(ctx, "session/prompt", params)
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "conexão encerrada") || !c.IsAlive() {
@@ -1124,9 +1176,13 @@ func (c *Client) RespondPermission(callID string, allow bool) error {
 		}
 	}
 
+	framer := c.getFramer()
+	if framer == nil {
+		return errors.New("cliente ACP encerrado")
+	}
 	if ok && perm.reqID != nil {
 		// Responde à requisição JSON-RPC enviada pelo agente
-		return c.framer.Respond(*perm.reqID, map[string]interface{}{
+		return framer.Respond(*perm.reqID, map[string]interface{}{
 			"allow":    allow,
 			"outcome":  outcome,
 			"optionId": chosenOptionID,
@@ -1134,7 +1190,7 @@ func (c *Client) RespondPermission(callID string, allow bool) error {
 	}
 
 	// Notificação fallback
-	return c.framer.Notify("session/permission_response", map[string]interface{}{
+	return framer.Notify("session/permission_response", map[string]interface{}{
 		"callId":   callID,
 		"allow":    allow,
 		"outcome":  outcome,
@@ -1145,7 +1201,11 @@ func (c *Client) RespondPermission(callID string, allow bool) error {
 // Cancel cancela o turno ativo na sessão
 func (c *Client) Cancel(sessionID string) error {
 	// Tenta notificação graciosa session/cancel
-	err := c.framer.Notify("session/cancel", map[string]string{
+	framer := c.getFramer()
+	if framer == nil {
+		return errors.New("cliente ACP encerrado")
+	}
+	err := framer.Notify("session/cancel", map[string]string{
 		"sessionId": sessionID,
 	})
 	if err != nil {
@@ -1182,9 +1242,11 @@ func (c *Client) Close() error {
 	framer := c.framer
 	cmd := c.cmd
 	logFile := c.logFile
+	exitCh := c.exitCh
 	c.framer = nil
 	c.cmd = nil
 	c.logFile = nil
+	c.exitCh = nil
 	c.mu.Unlock()
 
 	if framer != nil {
@@ -1192,21 +1254,30 @@ func (c *Client) Close() error {
 	}
 
 	if cmd != nil && cmd.Process != nil {
-		// Tenta encerramento gracioso via SIGTERM no grupo de processos e no processo
+		// Tenta encerramento gracioso via SIGTERM no grupo de processos e no processo.
+		// NUNCA chama cmd.Wait() aqui: a goroutine de spawn já faz o Wait único —
+		// aguardar exitCh evita o double-Wait (data race do os/exec).
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 
-		done := make(chan error, 1)
-		go func() {
-			done <- cmd.Wait()
-		}()
+		waitExit := func(d time.Duration) bool {
+			if exitCh == nil {
+				time.Sleep(d)
+				return false
+			}
+			select {
+			case <-exitCh:
+				return true
+			case <-time.After(d):
+				return false
+			}
+		}
 
-		select {
-		case <-done:
-		case <-time.After(500 * time.Millisecond):
+		if !waitExit(500 * time.Millisecond) {
 			// Força o término com SIGKILL se não responder
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			_ = cmd.Process.Kill()
+			waitExit(500 * time.Millisecond)
 		}
 	}
 

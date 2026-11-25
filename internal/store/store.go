@@ -12,6 +12,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"unicode/utf8"
 )
 
 // Conversation representa uma sessão de chat persistida
@@ -218,6 +219,16 @@ func (s *Store) GetConversation(id string) (*Conversation, error) {
 	return &c, nil
 }
 
+// DeleteMessagesFrom remove todas as mensagens da conversa com seq >= fromSeq.
+// Usado para truncar o histórico ao regenerar/editar o último turno.
+func (s *Store) DeleteMessagesFrom(convID string, fromSeq int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM messages WHERE conversation_id = ? AND seq >= ?`, convID, fromSeq)
+	return err
+}
+
 // ListConversations retorna todas as conversas ordenadas por updated_at desc
 func (s *Store) ListConversations() ([]*Conversation, error) {
 	s.mu.Lock()
@@ -231,7 +242,7 @@ func (s *Store) ListConversations() ([]*Conversation, error) {
 	}
 	defer rows.Close()
 
-	var list []*Conversation
+	list := make([]*Conversation, 0)
 	for rows.Next() {
 		var c Conversation
 		if err := rows.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.ModeID, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt); err != nil {
@@ -329,12 +340,13 @@ func (s *Store) AppendOrUpdateChunk(convID string, role string, chunkText string
 
 	now := time.Now().UnixMilli()
 
-	// Procura a última mensagem da conversa
+	// Procura a última mensagem da conversa (sem carregar o conteúdo: a
+	// concatenação acontece no SQLite, evitando O(n²) em respostas longas)
 	var lastID int64
-	var lastRole, lastContent, lastMeta string
+	var lastRole, lastMeta string
 	var lastSeq int
-	err := s.db.QueryRow(`SELECT id, seq, role, content, meta FROM messages
-		WHERE conversation_id = ? ORDER BY seq DESC LIMIT 1`, convID).Scan(&lastID, &lastSeq, &lastRole, &lastContent, &lastMeta)
+	err := s.db.QueryRow(`SELECT id, seq, role, meta FROM messages
+		WHERE conversation_id = ? ORDER BY seq DESC LIMIT 1`, convID).Scan(&lastID, &lastSeq, &lastRole, &lastMeta)
 
 	// Se a última mensagem for do mesmo role e o turno ainda não estiver finalizado
 	isClosedTurn := false
@@ -348,9 +360,9 @@ func (s *Store) AppendOrUpdateChunk(convID string, role string, chunkText string
 	}
 
 	if err == nil && lastRole == role && !isClosedTurn {
-		// Atualiza mensagem existente concatenando texto
-		newContent := lastContent + chunkText
-		_, err := s.db.Exec(`UPDATE messages SET content = ? WHERE id = ?`, newContent, lastID)
+		// Concatena no SQLite (content = content || ?): não transfere nem
+		// regrava o texto completo por chunk — custo por chunk vira O(chunk)
+		_, err := s.db.Exec(`UPDATE messages SET content = content || ?, created_at = ? WHERE id = ?`, chunkText, now, lastID)
 		if err != nil {
 			return nil, err
 		}
@@ -360,9 +372,9 @@ func (s *Store) AppendOrUpdateChunk(convID string, role string, chunkText string
 			ConversationID: convID,
 			Seq:            lastSeq,
 			Role:           role,
-			Content:        newContent,
-			Meta:           lastMeta,
-			CreatedAt:      now,
+			// Content não é recarregado ( callers ignoram; evita SELECT O(n) por chunk)
+			Meta:      lastMeta,
+			CreatedAt: now,
 		}, nil
 	}
 
@@ -407,34 +419,26 @@ func (s *Store) UpsertToolCallMessage(convID string, toolCallID, status, title, 
 	metaStr := string(metaBytes)
 
 	// Procura se já existe mensagem deste toolCallId na conversa
-	rows, err := s.db.Query(`SELECT id, seq FROM messages WHERE conversation_id = ? AND role = 'tool_call'`, convID)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id int64
-			var seq int
-			_ = rows.Scan(&id, &seq)
-			var mMeta string
-			_ = s.db.QueryRow(`SELECT meta FROM messages WHERE id = ?`, id).Scan(&mMeta)
-			if mMeta != "" {
-				var parsed map[string]interface{}
-				if json.Unmarshal([]byte(mMeta), &parsed) == nil {
-					if tid, ok := parsed["toolCallId"].(string); ok && tid == toolCallID {
-						_, _ = s.db.Exec(`UPDATE messages SET content = ?, meta = ? WHERE id = ?`, title, metaStr, id)
-						_, _ = s.db.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now, convID)
-						return &Message{
-							ID:             id,
-							ConversationID: convID,
-							Seq:            seq,
-							Role:           "tool_call",
-							Content:        title,
-							Meta:           metaStr,
-							CreatedAt:      now,
-						}, nil
-					}
-				}
-			}
-		}
+	// Busca única via json_extract (evita N+1: SELECT de todos os tool_calls
+	// + uma QueryRow de meta por linha)
+	var id int64
+	var seq int
+	errLookup := s.db.QueryRow(`SELECT id, seq FROM messages
+		WHERE conversation_id = ? AND role = 'tool_call'
+		  AND json_extract(meta, '$.toolCallId') = ?
+		LIMIT 1`, convID, toolCallID).Scan(&id, &seq)
+	if errLookup == nil {
+		_, _ = s.db.Exec(`UPDATE messages SET content = ?, meta = ? WHERE id = ?`, title, metaStr, id)
+		_, _ = s.db.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now, convID)
+		return &Message{
+			ID:             id,
+			ConversationID: convID,
+			Seq:            seq,
+			Role:           "tool_call",
+			Content:        title,
+			Meta:           metaStr,
+			CreatedAt:      now,
+		}, nil
 	}
 
 	// Não encontrou, insere novo
@@ -447,11 +451,11 @@ func (s *Store) UpsertToolCallMessage(convID string, toolCallID, status, title, 
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
+	newID, _ := res.LastInsertId()
 	_, _ = s.db.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now, convID)
 
 	return &Message{
-		ID:             id,
+		ID:             newID,
 		ConversationID: convID,
 		Seq:            nextSeq,
 		Role:           "tool_call",
@@ -498,7 +502,7 @@ func (s *Store) GetMessages(convID string) ([]*Message, error) {
 	}
 	defer rows.Close()
 
-	var list []*Message
+	list := make([]*Message, 0)
 	for rows.Next() {
 		var m Message
 		var meta sql.NullString
@@ -541,7 +545,7 @@ func (s *Store) ListWorkspaces(limit int) ([]*Workspace, error) {
 	}
 	defer rows.Close()
 
-	var list []*Workspace
+	list := make([]*Workspace, 0)
 	for rows.Next() {
 		var w Workspace
 		if err := rows.Scan(&w.CWD, &w.LastUsedAt); err != nil {
@@ -565,28 +569,34 @@ func makeSnippet(content, query string) string {
 	lowerContent := strings.ToLower(content)
 	lowerQuery := strings.ToLower(query)
 	idx := strings.Index(lowerContent, lowerQuery)
+
+	// Corta por RUNAS para não quebrar caracteres multibyte (acentos, emoji)
+	runes := []rune(content)
 	if idx == -1 {
-		if len(content) > 120 {
-			return content[:120] + "..."
+		if len(runes) > 120 {
+			return string(runes[:120]) + "..."
 		}
 		return content
 	}
 
-	start := idx - 60
+	matchRune := utf8.RuneCountInString(lowerContent[:idx])
+	queryRunes := utf8.RuneCountInString(lowerQuery)
+
+	start := matchRune - 60
 	prefix := "..."
 	if start <= 0 {
 		start = 0
 		prefix = ""
 	}
 
-	end := idx + len(query) + 60
+	end := matchRune + queryRunes + 60
 	suffix := "..."
-	if end >= len(content) {
-		end = len(content)
+	if end >= len(runes) {
+		end = len(runes)
 		suffix = ""
 	}
 
-	return prefix + content[start:end] + suffix
+	return prefix + string(runes[start:end]) + suffix
 }
 
 // Search realiza busca full-text LIKE case-insensitive em conversas e mensagens
@@ -624,7 +634,7 @@ func (s *Store) Search(query string, limit int) ([]SearchResult, error) {
 	}
 	defer rows.Close()
 
-	var results []SearchResult
+	results := make([]SearchResult, 0)
 	for rows.Next() {
 		var r SearchResult
 		var matchContent sql.NullString

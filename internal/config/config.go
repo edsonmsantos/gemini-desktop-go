@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"geminidesktop-go/internal/acp"
+	"log"
+	"time"
 )
 
 // AgentConfig define o comando e argumentos para execução do agente ACP
@@ -22,6 +24,12 @@ type Config struct {
 	DefaultCWD        string      `json:"defaultCwd"`
 	Port              int         `json:"port"`
 	TempWorkspacesDir string      `json:"tempWorkspacesDir,omitempty"`
+	Notifications     *bool       `json:"notifications,omitempty"` // nil = habilitado (default)
+}
+
+// NotificationsEnabled retorna se notificações nativas de fim de turno estão habilitadas
+func (c *Config) NotificationsEnabled() bool {
+	return c == nil || c.Notifications == nil || *c.Notifications
 }
 
 // GetTempWorkspacesDir retorna o diretório base para workspaces temporários
@@ -92,6 +100,15 @@ func LoadOrInit(customPath string) (*Config, error) {
 
 	if data, err := os.ReadFile(path); err == nil {
 		var cfg Config
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			// JSON inválido: preserva o arquivo antes de sobrescrever com defaults
+			backup := path + ".corrompido-" + time.Now().Format("20060102-150405")
+			if rbErr := os.Rename(path, backup); rbErr == nil {
+				log.Printf("[aviso] config.json inválido (%v) — original preservado em %s; criando defaults", err, filepath.Base(backup))
+			} else {
+				log.Printf("[aviso] config.json inválido (%v) e falha ao fazer backup: %v", err, rbErr)
+			}
+		}
 		if err := json.Unmarshal(data, &cfg); err == nil {
 			// Retrocompatibilidade: se agent.command estiver vazio mas cliPath existir
 			if cfg.Agent.Command == "" && cfg.CLIPath != "" {
@@ -126,6 +143,8 @@ func LoadOrInit(customPath string) (*Config, error) {
 		return cfg, err
 	}
 
-	_ = os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		log.Printf("[aviso] falha ao escrever config.json: %v", err)
+	}
 	return cfg, nil
 }
