@@ -94,6 +94,9 @@ type Server struct {
 
 	notifications bool
 
+	agentBinary string
+	port        int
+
 	mcpClient *mcp.Client
 	mcpMu     sync.Mutex
 	mcpCache  mcpCacheEntry
@@ -132,6 +135,7 @@ func NewServerV2(client *acp.Client, defaultCwd string, staticFS fs.FS, st *stor
 		orphanSessions: make(map[string]bool),
 		wsClients:      make(map[*websocket.Conn]bool),
 		skillsCache:    make(map[string]skillsCacheEntry),
+		port:           8399,
 		mcpClient:      mcp.NewClient("agy"),
 	}
 
@@ -176,6 +180,16 @@ func (s *Server) clientOrError(w http.ResponseWriter) bool {
 // SetNotificationsEnabled liga/desliga notificações nativas de fim de turno
 func (s *Server) SetNotificationsEnabled(enabled bool) {
 	s.notifications = enabled
+}
+
+// SetAgentBinary define o nome ou caminho do binário do agente ACP configurado
+func (s *Server) SetAgentBinary(binary string) {
+	s.agentBinary = binary
+}
+
+// SetPort define a porta do servidor HTTP
+func (s *Server) SetPort(port int) {
+	s.port = port
 }
 
 // SetUserSkillsDir define o diretório raiz das skills de usuário (global)
@@ -362,6 +376,9 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 func (s *Server) setupRoutes() {
 	// Endpoints comuns
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/diagnostics", s.handleDiagnostics)
+	s.mux.HandleFunc("GET /api/onboarding/status", s.handleOnboardingStatus)
+	s.mux.HandleFunc("POST /api/onboarding/done", s.handleOnboardingDone)
 	s.mux.HandleFunc("GET /api/agent-info", s.handleAgentInfo)
 	s.mux.HandleFunc("GET /api/stream", s.handleStream)
 	s.mux.HandleFunc("GET /api/models", s.handleModels)
@@ -413,14 +430,6 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
 	// tier é condicional (abaixo); não usar clientOrError aqui.
 	w.Header().Set("Content-Type", "application/json")
 
-	path := s.googleAccountsPath
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			path = filepath.Join(home, ".gemini", "google_accounts.json")
-		}
-	}
-
 	type response struct {
 		Email *string       `json:"email"`
 		Tier  *acp.TierInfo `json:"tier"`
@@ -431,27 +440,8 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
 		tier = s.client.LatestTier()
 	}
 
-	if path == "" {
-		_ = json.NewEncoder(w).Encode(response{Email: nil, Tier: tier})
-		return
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		_ = json.NewEncoder(w).Encode(response{Email: nil, Tier: tier})
-		return
-	}
-
-	var parsed struct {
-		Active string `json:"active"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil || strings.TrimSpace(parsed.Active) == "" {
-		_ = json.NewEncoder(w).Encode(response{Email: nil, Tier: tier})
-		return
-	}
-
-	email := strings.TrimSpace(parsed.Active)
-	_ = json.NewEncoder(w).Encode(response{Email: &email, Tier: tier})
+	email := s.readActiveGoogleEmail()
+	_ = json.NewEncoder(w).Encode(response{Email: email, Tier: tier})
 }
 
 // GET /api/models

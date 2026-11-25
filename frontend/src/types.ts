@@ -157,3 +157,16 @@ export interface Artifact {
   size: number
   modified: number
 }
+
+export interface DiagnosticsInfo {
+  agentBinary: string
+  agentFound: boolean
+  agentAlive: boolean
+  googleEmail: string | null
+  dbOk: boolean
+  port: number
+}
+
+export interface OnboardingStatus {
+  done: boolean
+}

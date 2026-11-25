@@ -87,6 +87,15 @@ func ConfigFilePath() (string, error) {
 	return filepath.Join(home, ".geminidesktop", "config.json"), nil
 }
 
+// OnboardingMarkerPath retorna o caminho do arquivo marcador de onboarding concluído
+func OnboardingMarkerPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".geminidesktop", "onboarded"), nil
+}
+
 // LoadOrInit carrega a configuração ou cria o arquivo com defaults detectados
 func LoadOrInit(customPath string) (*Config, error) {
 	path := customPath
