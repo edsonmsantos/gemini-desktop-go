@@ -387,13 +387,40 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     }
   }
 
-  // Anexa arquivos soltos na conversa (conteúdo é enviado ao backend e salvo em temp)
+  // Anexa arquivos soltos na conversa. WebKitGTK entrega o drop como
+  // text/uri-list com caminhos reais (atalho rápido, sem upload); Chromium
+  // entrega File objects (conteúdo enviado ao backend e salvo em temp).
   const handleDrop = useCallback(
     async (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault()
       setDragging(false)
       if (!onAddFiles) return
-      const dropped = Array.from(e.dataTransfer?.files ?? [])
+      const dt = e.dataTransfer
+
+      // 1. Caminhos reais via uri-list (WebKitGTK / gerenciador de arquivos)
+      const uriList = dt.getData('text/uri-list') || ''
+      const gnomeList = dt.getData('x-special/gnome-copied-files') || ''
+      const raw = uriList || (gnomeList.includes('file://') ? gnomeList : '')
+      if (raw.includes('file://')) {
+        const extracted: string[] = []
+        for (const line of raw.split(/[\r\n]+/)) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('file://')) continue
+          try {
+            const path = decodeURIComponent(trimmed.replace(/^file:\/\//, ''))
+            if (path && !extracted.includes(path)) extracted.push(path)
+          } catch {
+            // ignore
+          }
+        }
+        if (extracted.length > 0) {
+          onAddFiles(extracted)
+          return
+        }
+      }
+
+      // 2. File objects (Chromium): upload do conteúdo
+      const dropped = Array.from(dt.files ?? [])
       if (dropped.length === 0) return
       const paths: string[] = []
       for (const file of dropped.slice(0, 10)) {

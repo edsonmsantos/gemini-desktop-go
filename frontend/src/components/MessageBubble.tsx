@@ -104,16 +104,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const sources = isAssistant ? extractSources(message.content) : []
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(message.content)
-    } catch {
-      // Fallback para webviews sem permissão de clipboard async
+    // Clipboard async pode ficar PENDENTE (permissão do navegador) e nunca
+    // resolver — corre com timeout e cai no fallback execCommand.
+    const fallbackCopy = () => {
       const ta = document.createElement('textarea')
       ta.value = message.content
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
       document.body.appendChild(ta)
       ta.select()
-      document.execCommand('copy')
+      try {
+        document.execCommand('copy')
+      } catch {
+        // ignore
+      }
       ta.remove()
+    }
+    try {
+      await Promise.race([
+        navigator.clipboard.writeText(message.content),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('clipboard timeout')), 800))
+      ])
+    } catch {
+      fallbackCopy()
     }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
