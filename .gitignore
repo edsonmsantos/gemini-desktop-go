@@ -1,0 +1,16 @@
+# Build outputs
+build/
+frontend/dist/
+dist/
+*.exe
+*.test
+
+# Dependencies
+node_modules/
+
+# Logs and local artifacts
+*.log
+testdata/fake-acp-agent/fake-agent
+
+# OS
+.DS_Store
