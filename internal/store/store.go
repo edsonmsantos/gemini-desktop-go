@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -549,4 +550,100 @@ func (s *Store) ListWorkspaces(limit int) ([]*Workspace, error) {
 		list = append(list, &w)
 	}
 	return list, nil
+}
+
+// SearchResult representa um resultado de busca agrupado por conversa
+type SearchResult struct {
+	ConversationID string `json:"conversationId"`
+	Title          string `json:"title"`
+	CWD            string `json:"cwd"`
+	Snippet        string `json:"snippet"`
+	UpdatedAt      int64  `json:"updatedAt"`
+}
+
+func makeSnippet(content, query string) string {
+	lowerContent := strings.ToLower(content)
+	lowerQuery := strings.ToLower(query)
+	idx := strings.Index(lowerContent, lowerQuery)
+	if idx == -1 {
+		if len(content) > 120 {
+			return content[:120] + "..."
+		}
+		return content
+	}
+
+	start := idx - 60
+	prefix := "..."
+	if start <= 0 {
+		start = 0
+		prefix = ""
+	}
+
+	end := idx + len(query) + 60
+	suffix := "..."
+	if end >= len(content) {
+		end = len(content)
+		suffix = ""
+	}
+
+	return prefix + content[start:end] + suffix
+}
+
+// Search realiza busca full-text LIKE case-insensitive em conversas e mensagens
+func (s *Store) Search(query string, limit int) ([]SearchResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return []SearchResult{}, nil
+	}
+
+	if limit <= 0 {
+		limit = 40
+	}
+
+	likeParam := "%" + trimmed + "%"
+	sqlQuery := `
+		SELECT c.id, c.title, c.cwd, c.updated_at,
+		       COALESCE(
+		           (SELECT m.content FROM messages m WHERE m.conversation_id = c.id AND m.content LIKE ? ORDER BY m.seq ASC LIMIT 1),
+		           c.title
+		       ) AS match_content
+		FROM conversations c
+		WHERE c.title LIKE ? OR EXISTS (
+		    SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.content LIKE ?
+		)
+		ORDER BY c.updated_at DESC
+		LIMIT ?;
+	`
+
+	rows, err := s.db.Query(sqlQuery, likeParam, likeParam, likeParam, limit)
+	if err != nil {
+		return nil, fmt.Errorf("falha ao buscar conversas: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		var matchContent sql.NullString
+		if err := rows.Scan(&r.ConversationID, &r.Title, &r.CWD, &r.UpdatedAt, &matchContent); err != nil {
+			return nil, err
+		}
+
+		rawSnippetSource := r.Title
+		if matchContent.Valid && matchContent.String != "" {
+			rawSnippetSource = matchContent.String
+		}
+
+		r.Snippet = makeSnippet(rawSnippetSource, trimmed)
+		results = append(results, r)
+	}
+
+	if results == nil {
+		results = []SearchResult{}
+	}
+
+	return results, nil
 }

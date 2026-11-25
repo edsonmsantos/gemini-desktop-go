@@ -3,8 +3,7 @@ import { MessageBubble } from './MessageBubble'
 import { PromptBar } from './PromptBar'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallCard } from './ToolCallCard'
-import { PermissionCard } from './PermissionCard'
-import { PlanCard } from './PlanCard'
+import { TodoPanel } from './TodoPanel'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { GeminiSparkle } from './icons'
 import { Message, Model, ModesInfo, PermissionRequest, Plan, ToolCall } from '../types'
@@ -92,6 +91,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
           margin: '0 auto'
         }}
       >
+        {/* TodoPanel minimalista fixo no topo da área de mensagens */}
+        {activePlan && <TodoPanel plan={activePlan} isStreaming={isStreaming} />}
+
         {messages.map((msg) => (
           <MessageBubble
             key={msg.id || `${msg.role}-${msg.seq}`}
@@ -105,19 +107,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <ThinkingBlock thinking={streamingThought} isStreaming={isStreaming} />
         )}
 
-        {activePlan && <PlanCard plan={activePlan} />}
-
         {activeToolCalls.map((tc) => (
           <ToolCallCard key={tc.id} toolCall={tc} />
         ))}
-
-        {pendingPermission && (
-          <PermissionCard
-            request={pendingPermission}
-            onRespond={onRespondPermission}
-            disabled={!isStreaming}
-          />
-        )}
 
         {streamingText && (
           <div

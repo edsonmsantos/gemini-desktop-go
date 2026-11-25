@@ -122,6 +122,10 @@ Para usar o Gemini CLI oficial:
      | `POST` | `/api/permission` | Decisão do usuário (Permitir/Negar) sobre ações do agente |
      | `POST` | `/api/cancel` | Cancelamento do turno em execução |
      | `GET` | `/api/stream` | Stream WebSocket com frames enriquecidos com `conversationId` |
+     | `GET` | `/api/skills` | Lista skills dos escopos global (`~/.agents/skills`) e workspace (`<cwd>/.agents/skills`) com deduplicação |
+     | `GET` | `/api/mcp` | Lista servidores MCP registrados via CLI `agy mcp list` com status de disponibilidade |
+     | `POST` | `/api/mcp/{name}/toggle` | Habilita ou desabilita um servidor MCP via CLI `agy mcp enable/disable` |
+     | `GET` | `/api/search` | Busca full-text nas conversas e mensagens com snippets de contexto e limite configurável |
 
 5. **`frontend/` (React + Vite + TypeScript)**:
    - Interface desktop fiel ao Gemini (tema dual dark `#131314` + light, glow radial azul, tipografia Google Sans).
@@ -220,10 +224,11 @@ go vet ./...
 
 ## Roadmap
 
-- [ ] Fase 3A: capacidades do agy (`modes`, `configOptions`, plano da conta) expostas na UI
-- [ ] Fase 3B: paleta de **skills** (`/` e `$`) lendo `~/.agents/skills` e `.agents/skills` do workspace
-- [ ] Fase 3C: gestão de **servidores MCP** (status, enable/disable via `agy mcp`, `mcpServers` por conversa)
-- [ ] Fase 3D: polish inspirado em ZCode — permission dialog com preview, renderers de tool call (diff), Command Center `Ctrl+K`
+- [x] Fase 3A: capacidades do agy (`modes`, `configOptions`, plano da conta) expostas na UI
+- [x] Fase 3B: paleta de **skills** (`/` e `$`) lendo `~/.agents/skills` e `.agents/skills` do workspace
+- [x] Fase 3C: gestão de **servidores MCP** (status, enable/disable via `agy mcp`, `mcpServers` por conversa)
+- [x] Fase 3D: polish inspirado em ZCode — permission dialog com preview (diff/terminal), renderers de tool call, TodoPanel minimalista, Command Center `Ctrl+K` com busca full-text
+- [ ] Próximos: voz, painel de uso de contexto, Gen UI (HTML do agente em sandbox), terminal embutido
 
 ## Créditos & Tecnologia
 

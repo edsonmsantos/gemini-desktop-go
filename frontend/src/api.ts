@@ -1,4 +1,4 @@
-import { AgentInfo, CapabilitiesResponse, Conversation, MCPResponse, MCPServer, Message, Model, SkillsResponse, Workspace, WSEvent } from './types'
+import { AgentInfo, CapabilitiesResponse, Conversation, MCPResponse, MCPServer, Message, Model, SearchResult, SkillsResponse, Workspace, WSEvent } from './types'
 
 declare global {
   interface Window {
@@ -340,4 +340,15 @@ export async function toggleMCPServer(name: string, enable: boolean): Promise<{ 
     throw new Error(err || 'Falha ao alterar estado do servidor MCP')
   }
   return res.json()
+}
+
+export async function searchConversations(query: string): Promise<SearchResult[]> {
+  const trimmed = query.trim()
+  if (!trimmed) return []
+  const res = await fetch(`${getBaseURL()}/api/search?q=${encodeURIComponent(trimmed)}`)
+  if (!res.ok) {
+    throw new Error('Falha ao pesquisar conversas')
+  }
+  const data = await res.json()
+  return data.results || []
 }

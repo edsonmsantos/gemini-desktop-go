@@ -10,6 +10,7 @@ interface SettingsModalProps {
   agentCmd: string
   theme: 'dark' | 'light'
   onToggleTheme: () => void
+  initialTab?: 'general' | 'mcp'
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -18,9 +19,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   port,
   agentCmd,
   theme,
-  onToggleTheme
+  onToggleTheme,
+  initialTab = 'general'
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'mcp'>('general')
+  const [activeTab, setActiveTab] = useState<'general' | 'mcp'>(initialTab)
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab)
+    }
+  }, [isOpen, initialTab])
 
   // Estado da aba MCP Servers
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])

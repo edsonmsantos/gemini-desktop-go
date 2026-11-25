@@ -6,6 +6,7 @@ export interface ToolCall {
   title: string
   kind?: string
   rawInput?: Record<string, unknown>
+  rawOutput?: string
 }
 
 export interface PlanEntry {
@@ -107,6 +108,14 @@ export interface MCPServer {
 export interface MCPResponse {
   servers: MCPServer[]
   available: boolean
+}
+
+export interface SearchResult {
+  conversationId: string
+  title: string
+  cwd: string
+  snippet: string
+  updatedAt: number
 }
 
 export interface ConfigOption {

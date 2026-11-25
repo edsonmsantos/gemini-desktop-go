@@ -4,6 +4,8 @@ import { WelcomeView } from './components/WelcomeView'
 import { ChatView } from './components/ChatView'
 import { SettingsModal } from './components/SettingsModal'
 import { NewConversationModal } from './components/NewConversationModal'
+import { PermissionDialog } from './components/PermissionDialog'
+import { CommandCenterModal } from './components/CommandCenterModal'
 import {
   fetchAgentInfo,
   fetchModels,
@@ -66,9 +68,23 @@ export const App: React.FC = () => {
 
   // Modais de UI
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
+  const [settingsTab, setSettingsTab] = useState<'general' | 'mcp'>('general')
   const [isNewConvModalOpen, setIsNewConvModalOpen] = useState<boolean>(false)
+  const [isCommandCenterOpen, setIsCommandCenterOpen] = useState<boolean>(false)
   const [serverPort, setServerPort] = useState<number>(8399)
   const [agentCmd, setAgentCmd] = useState<string>('')
+
+  // Listener global para Command Center (Ctrl+K / Cmd+K)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setIsCommandCenterOpen((prev) => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown)
+  }, [])
 
   // Refs para capturar o estado mais atual no callback do WebSocket sem recriar listener
   const activeConvIdRef = useRef<string | null>(null)
@@ -569,6 +585,24 @@ export const App: React.FC = () => {
     }
   }
 
+  // Negar pedido de permissão e responder com feedback em texto
+  const handleRejectWithFeedback = async (callId: string, feedback: string) => {
+    try {
+      await respondPermission(callId, false)
+      setPendingPermission(null)
+      if (activeConversationId && feedback.trim()) {
+        await sendPrompt(activeConversationId, feedback.trim())
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleOpenSettings = (tab?: 'general' | 'mcp') => {
+    setSettingsTab(tab || 'general')
+    setIsSettingsOpen(true)
+  }
+
   const isWelcome = !activeConversationId && messages.length === 0
   const activeConversation = conversations.find((c) => c.id === activeConversationId)
   const currentCwd = activeConversation?.cwd || selectedCwd || ''
@@ -599,7 +633,7 @@ export const App: React.FC = () => {
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
         onSelectCwd={(cwd) => setSelectedCwd(cwd)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => handleOpenSettings('general')}
       />
 
       {/* Área Central: Welcome State ou Chat View */}
@@ -666,6 +700,26 @@ export const App: React.FC = () => {
         agentCmd={agentCmd}
         theme={theme}
         onToggleTheme={toggleTheme}
+        initialTab={settingsTab}
+      />
+
+      {/* Modal Central Rico de Permissão */}
+      <PermissionDialog
+        request={pendingPermission}
+        onRespond={handleRespondPermission}
+        onRejectWithFeedback={handleRejectWithFeedback}
+        disabled={!isStreaming}
+      />
+
+      {/* Command Center Ctrl+K */}
+      <CommandCenterModal
+        isOpen={isCommandCenterOpen}
+        onClose={() => setIsCommandCenterOpen(false)}
+        onNewConversation={handleOpenNewConversationModal}
+        onToggleTheme={toggleTheme}
+        onOpenSettings={handleOpenSettings}
+        onSelectConversation={handleSelectConversation}
+        theme={theme}
       />
     </div>
   )

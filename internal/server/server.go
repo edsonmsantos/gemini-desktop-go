@@ -346,6 +346,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/skills", s.handleSkills)
 	s.mux.HandleFunc("GET /api/mcp", s.handleListMCP)
 	s.mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
+	s.mux.HandleFunc("GET /api/search", s.handleSearch)
 
 	// Endpoints v2 de conversas
 	s.mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)
@@ -643,6 +644,29 @@ func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
 		resp["server"] = updatedServer
 	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// GET /api/search?q=<query>
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if s.store == nil || q == "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"results": []store.SearchResult{},
+		})
+		return
+	}
+
+	results, err := s.store.Search(q, 40)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"results": results,
+	})
 }
 
 // POST /api/conversations {cwd, modelId?, modeId?}
