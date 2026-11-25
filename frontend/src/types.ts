@@ -170,3 +170,9 @@ export interface DiagnosticsInfo {
 export interface OnboardingStatus {
   done: boolean
 }
+
+export interface FileContent {
+  kind: 'text' | 'image'
+  mime: string
+  content: string
+}
