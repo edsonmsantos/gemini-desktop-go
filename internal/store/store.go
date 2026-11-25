@@ -22,6 +22,7 @@ type Conversation struct {
 	Agent        string `json:"agent"`
 	ModelID      string `json:"modelId"`
 	ModeID       string `json:"modeId,omitempty"`
+	Folder       string `json:"folder"`
 	CWD          string `json:"cwd"`
 	ACPSessionID string `json:"sessionId"`
 	CreatedAt    int64  `json:"createdAt"`
@@ -80,6 +81,10 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("falha na migration do banco: %w", err)
+	}
+	if err := s.migrateFolders(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("falha na migration de folders: %w", err)
 	}
 	if err := s.migratePrompts(); err != nil {
 		_ = db.Close()
@@ -197,9 +202,9 @@ func (s *Store) CreateConversation(c *Conversation) error {
 		c.UpdatedAt = now
 	}
 
-	query := `INSERT INTO conversations (id, title, agent, model_id, mode_id, cwd, acp_session_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := s.db.Exec(query, c.ID, c.Title, c.Agent, c.ModelID, c.ModeID, c.CWD, c.ACPSessionID, c.CreatedAt, c.UpdatedAt)
+	query := `INSERT INTO conversations (id, title, agent, model_id, mode_id, folder, cwd, acp_session_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query, c.ID, c.Title, c.Agent, c.ModelID, c.ModeID, c.Folder, c.CWD, c.ACPSessionID, c.CreatedAt, c.UpdatedAt)
 	return err
 }
 
@@ -208,12 +213,12 @@ func (s *Store) GetConversation(id string) (*Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `SELECT id, title, agent, model_id, COALESCE(mode_id, ''), cwd, acp_session_id, created_at, updated_at
+	query := `SELECT id, title, agent, model_id, COALESCE(mode_id, ''), COALESCE(folder, ''), cwd, acp_session_id, created_at, updated_at
 		FROM conversations WHERE id = ?`
 	row := s.db.QueryRow(query, id)
 
 	var c Conversation
-	err := row.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.ModeID, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.ModeID, &c.Folder, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("conversa %s não encontrada", id)
 	}
@@ -238,7 +243,7 @@ func (s *Store) ListConversations() ([]*Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `SELECT id, title, agent, model_id, COALESCE(mode_id, ''), cwd, acp_session_id, created_at, updated_at
+	query := `SELECT id, title, agent, model_id, COALESCE(mode_id, ''), COALESCE(folder, ''), cwd, acp_session_id, created_at, updated_at
 		FROM conversations ORDER BY updated_at DESC`
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -249,7 +254,7 @@ func (s *Store) ListConversations() ([]*Conversation, error) {
 	list := make([]*Conversation, 0)
 	for rows.Next() {
 		var c Conversation
-		if err := rows.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.ModeID, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Title, &c.Agent, &c.ModelID, &c.ModeID, &c.Folder, &c.CWD, &c.ACPSessionID, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, &c)

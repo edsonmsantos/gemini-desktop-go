@@ -1,4 +1,4 @@
-import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, MCPResponse, MCPServer, Message, Model, SavedPrompt, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
+import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, FolderInfo, MCPResponse, MCPServer, Message, Model, SavedPrompt, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
 
 declare module 'react' {
   // Permite custom properties (--var) em objetos de estilo
@@ -585,5 +585,41 @@ export async function deleteSavedPrompt(id: string): Promise<boolean> {
     return false
   }
 }
+
+export async function fetchFolders(): Promise<FolderInfo[]> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/folders`)
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.folders ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function setConversationFolder(id: string, folder: string): Promise<{ id: string; folder: string }> {
+  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}/folder`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder })
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(errText || 'Falha ao definir pasta da conversa')
+  }
+  return res.json()
+}
+
+export async function deleteFolder(name: string): Promise<{ count: number }> {
+  const res = await fetch(`${getBaseURL()}/api/folders/${encodeURIComponent(name)}`, {
+    method: 'DELETE'
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(errText || 'Falha ao excluir pasta')
+  }
+  return res.json()
+}
+
 
 
