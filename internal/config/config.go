@@ -1,0 +1,131 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"geminidesktop-go/internal/acp"
+)
+
+// AgentConfig define o comando e argumentos para execução do agente ACP
+type AgentConfig struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+}
+
+// Config representa as configurações locais do Gemini Desktop
+type Config struct {
+	Agent             AgentConfig `json:"agent"`
+	CLIPath           string      `json:"cliPath,omitempty"` // Mantido para retrocompatibilidade
+	DefaultCWD        string      `json:"defaultCwd"`
+	Port              int         `json:"port"`
+	TempWorkspacesDir string      `json:"tempWorkspacesDir,omitempty"`
+}
+
+// GetTempWorkspacesDir retorna o diretório base para workspaces temporários
+func (c *Config) GetTempWorkspacesDir() string {
+	if c != nil && c.TempWorkspacesDir != "" {
+		return c.TempWorkspacesDir
+	}
+	return filepath.Join(os.TempDir(), "geminidesktop")
+}
+
+// DefaultConfig retorna as configurações padrão com autodetecção do agente
+func DefaultConfig() *Config {
+	cwd, _ := os.Getwd()
+	agentCmd := "gemini"
+	agentArgs := []string{"--acp"}
+
+	detected, err := acp.FindAgentBinary()
+	if err == nil {
+		agentCmd = detected
+		if derived, errArgs := acp.DeriveAgentArgs(detected); errArgs == nil {
+			agentArgs = derived
+		}
+	}
+
+	return &Config{
+		Agent: AgentConfig{
+			Command: agentCmd,
+			Args:    agentArgs,
+		},
+		CLIPath:    agentCmd,
+		DefaultCWD: cwd,
+		Port:       8399,
+	}
+}
+
+// APIBaseURL retorna a URL base local formatada para a porta informada
+func APIBaseURL(port int) string {
+	if port <= 0 {
+		port = 8399
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
+// FormatInjectJS gera o script JavaScript injetado no Webview Wails com a porta real
+func FormatInjectJS(port int) string {
+	baseURL := APIBaseURL(port)
+	return fmt.Sprintf("window.__GMD_API__ = %q; window.__GEMINI_DESKTOP_CONFIG__ = { port: %d, baseUrl: %q };", baseURL, port, baseURL)
+}
+
+func ConfigFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".geminidesktop", "config.json"), nil
+}
+
+// LoadOrInit carrega a configuração ou cria o arquivo com defaults detectados
+func LoadOrInit(customPath string) (*Config, error) {
+	path := customPath
+	if path == "" {
+		p, err := ConfigFilePath()
+		if err != nil {
+			return DefaultConfig(), err
+		}
+		path = p
+	}
+
+	if data, err := os.ReadFile(path); err == nil {
+		var cfg Config
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			// Retrocompatibilidade: se agent.command estiver vazio mas cliPath existir
+			if cfg.Agent.Command == "" && cfg.CLIPath != "" {
+				cfg.Agent.Command = cfg.CLIPath
+			}
+			if cfg.CLIPath == "" && cfg.Agent.Command != "" {
+				cfg.CLIPath = cfg.Agent.Command
+			}
+
+			// Autodetecção de args se ausentes
+			if len(cfg.Agent.Args) == 0 && cfg.Agent.Command != "" {
+				if args, err := acp.DeriveAgentArgs(cfg.Agent.Command); err == nil {
+					cfg.Agent.Args = args
+				}
+			}
+
+			if cfg.Port == 0 {
+				cfg.Port = 8399
+			}
+			return &cfg, nil
+		}
+	}
+
+	// Cria arquivo com defaults se ausente ou inválido
+	cfg := DefaultConfig()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return cfg, err
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return cfg, err
+	}
+
+	_ = os.WriteFile(path, data, 0644)
+	return cfg, nil
+}
