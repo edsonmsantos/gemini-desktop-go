@@ -364,15 +364,19 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        backgroundColor: diagnostics?.googleEmail ? 'rgba(52, 168, 83, 0.15)' : 'rgba(234, 67, 53, 0.15)',
-                        color: diagnostics?.googleEmail ? 'var(--status-completed)' : 'var(--status-failed)',
+                        backgroundColor: (diagnostics?.googleEmail || diagnostics?.agentAlive)
+                          ? 'rgba(52, 168, 83, 0.15)'
+                          : 'rgba(234, 67, 53, 0.15)',
+                        color: (diagnostics?.googleEmail || diagnostics?.agentAlive)
+                          ? 'var(--status-completed)'
+                          : 'var(--status-failed)',
                         fontWeight: 'bold',
                         fontSize: 12,
                         flexShrink: 0,
                         marginTop: 2
                       }}
                     >
-                      {diagnostics?.googleEmail ? '✓' : '✗'}
+                      {diagnostics?.googleEmail || diagnostics?.agentAlive ? '✓' : '✗'}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -396,6 +400,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                       <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                         {diagnostics?.googleEmail
                           ? 'Sessão autenticada via Google Accounts.'
+                          : diagnostics?.agentAlive
+                          ? 'Agente autenticado (o agy gerencia as credenciais internamente).'
                           : 'Nenhuma conta detectada. Execute "agy auth login" ou "gemini" no terminal para conectar.'}
                       </span>
                     </div>

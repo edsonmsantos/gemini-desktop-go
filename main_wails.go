@@ -179,6 +179,8 @@ func (a *App) startup(ctx context.Context) {
 	a.server = server.NewServerV2(client, cfg.DefaultCWD, web.Files, st)
 	a.server.SetTempWorkspacesDir(cfg.GetTempWorkspacesDir())
 	a.server.SetNotificationsEnabled(cfg.NotificationsEnabled())
+	a.server.SetAgentBinary(cfg.Agent.Command)
+	a.server.SetPort(a.port)
 	addr := fmt.Sprintf("127.0.0.1:%d", a.port)
 	a.httpServer = &http.Server{
 		Addr:    addr,
