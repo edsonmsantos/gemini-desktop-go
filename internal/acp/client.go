@@ -236,7 +236,7 @@ func (c *Client) startProcessLocked() error {
 	}
 
 	cmd := exec.Command(bin, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureProcessGroup(cmd)
 	cmd.Stderr = c.logFile
 
 	stdinPipe, err := cmd.StdinPipe()
@@ -257,7 +257,7 @@ func (c *Client) startProcessLocked() error {
 		// Fallback para --experimental-acp APENAS se o binário for gemini
 		if filepath.Base(bin) == "gemini" && len(args) > 0 && args[0] == "--acp" {
 			fallbackCmd := exec.Command(bin, "--experimental-acp")
-			fallbackCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			configureProcessGroup(fallbackCmd)
 			fallbackCmd.Stderr = c.logFile
 			sIn, errIn := fallbackCmd.StdinPipe()
 			sOut, errOut := fallbackCmd.StdoutPipe()
@@ -761,7 +761,7 @@ func (c *Client) IsAlive() bool {
 	if c.dead || c.cmd == nil || c.cmd.Process == nil {
 		return false
 	}
-	if err := c.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+	if !isProcessAlive(c.cmd.Process) {
 		c.dead = true
 		return false
 	}
@@ -774,7 +774,7 @@ func (c *Client) EnsureProcess(ctx context.Context) error {
 	defer c.mu.Unlock()
 
 	if !c.dead && c.cmd != nil && c.cmd.Process != nil {
-		if err := c.cmd.Process.Signal(syscall.Signal(0)); err == nil {
+		if isProcessAlive(c.cmd.Process) {
 			return nil
 		}
 	}
@@ -1211,7 +1211,7 @@ func (c *Client) Cancel(sessionID string) error {
 	if err != nil {
 		// Se session/cancel não disponível -> SIGTERM no processo
 		if c.cmd != nil && c.cmd.Process != nil {
-			_ = c.cmd.Process.Signal(syscall.SIGTERM)
+			_ = signalProcessTerm(c.cmd.Process)
 		}
 	}
 	return nil
@@ -1257,8 +1257,8 @@ func (c *Client) Close() error {
 		// Tenta encerramento gracioso via SIGTERM no grupo de processos e no processo.
 		// NUNCA chama cmd.Wait() aqui: a goroutine de spawn já faz o Wait único —
 		// aguardar exitCh evita o double-Wait (data race do os/exec).
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_ = killProcessGroup(cmd.Process.Pid)
+		_ = signalProcessTerm(cmd.Process)
 
 		waitExit := func(d time.Duration) bool {
 			if exitCh == nil {
@@ -1275,8 +1275,8 @@ func (c *Client) Close() error {
 
 		if !waitExit(500 * time.Millisecond) {
 			// Força o término com SIGKILL se não responder
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			_ = cmd.Process.Kill()
+			_ = killProcessGroupForce(cmd.Process.Pid)
+			_ = signalProcessKill(cmd.Process)
 			waitExit(500 * time.Millisecond)
 		}
 	}
