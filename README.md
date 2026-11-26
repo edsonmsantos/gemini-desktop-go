@@ -142,10 +142,22 @@ Para usar o Gemini CLI oficial:
      | `GET` | `/api/browser/status` | Retorna o status de conexão da ponte do navegador (daemon Go ou Node na porta 9223) |
      | `GET` | `/api/browser/approvals` | Lista pedidos de aprovação pendentes da ponte do navegador (modo ask) |
      | `POST` | `/api/browser/approvals/{id}` | Resolve uma aprovação pendente (`approve: bool`) na ponte do navegador |
+     | `GET` | `/api/browser/wizard/state` | Estado do wizard do navegador (agentFound, browsers detectados/políticas, extensionConnected, updateBaseURL) |
+     | `POST` | `/api/browser/install-policy` | Instala política de extensão automaticamente no navegador informado |
+     | `POST` | `/api/browser/remove-policy` | Remove política de extensão no navegador informado |
 
-### Integração com o Navegador (browser-bridge)
+### Navegador integrado (browser-bridge in-process)
 
-O GeminiDesktop possui integração nativa com o ecossistema **browser-bridge** (rodando localmente na porta 9223). O app atua como cliente HTTP transparente da ponte (com autenticação Bearer via `~/.browser-bridge/token.txt` no daemon Go e fallback automático para o daemon Node):
+O GeminiDesktop fecha o produto único integrando nativamente o daemon do **browser-bridge em-processo**, eliminando a necessidade de iniciar um daemon separado manualmente:
+- **Eleição de Porta Automática (9223)**: na inicialização do app, o GeminiDesktop tenta assumir a porta 9223 como primário in-process. Se a porta estiver livre, ele hospeda a ponte diretamente. Se a porta já estiver ocupada (por exemplo, por um daemon CLI externo `browser-bridge serve`), ele coexiste graciosamente como cliente REST sem conflitos.
+- **Wizard de Primeiro Executo (Browser Setup Wizard)**: integrado ao OnboardingModal no primeiro executo, detecta os navegadores instalados no sistema operacional (Brave, Google Chrome, Microsoft Edge, Chromium), verifica a existência de políticas `ExtensionSettings` e permite a instalação da extensão com apenas 1 clique (via `policymgr`). Em seguida, acompanha o reinício do navegador com polling automático até a conexão ser estabelecida, dispondo de fallback guiado documentado (`Load unpacked` na pasta `~/.browser-bridge/extension` ou comando CLI `browser-bridge install browsers`).
+- **Dependência Externa Explícita (agy CLI)**: o assistente detecta a presença do binário `agy` (ou `gemini`) no sistema. Se ausente, exibe um cartão orientando a instalação do Antigravity CLI e login com a conta Google via [https://antigravity.google](https://antigravity.google), sem bloquear o fluxo de configuração do navegador.
+- **Configurações**: em `~/.geminidesktop/config.json`:
+  - `browserBridgeInProcess`: booleano (padrão `true`). Permite desativar a hospedagem do daemon em-processo caso o usuário deseje delegar exclusivamente a processos externos.
+  - `browserBridgeUpdateBaseURL`: string opcional com a URL base para manifestos e pacotes CRX de atualização da extensão (padrão local: `http://127.0.0.1:9223/update`).
+  - `browserBridgePort`: porta TCP da ponte (padrão `9223`).
+  - `browserBridgeTokenPath`: caminho do token de autenticação (padrão `~/.browser-bridge/token.txt`).
+
 - **Status Pill em Tempo Real**: pill visual no rodapé indica o status de prontidão da ponte e da extensão do navegador.
 - **BrowserToolCard**: chamadas MCP para `browser-bridge` recebem visualização humanizada com títulos em português (`Ler página`, `Capturar tela`, `Abrir URL`), badges de contexto e segurança (`trusted`, `modal`, `falhou`), além de argumentos e saídas colapsáveis.
 - **Screenshots Inline**: ao concluir uma captura de tela (`browser_screenshot` ou `browser_som_screenshot`), a imagem mais recente do cache é copiada para `~/.geminidesktop/screenshots/<conversationId>/` e renderizada inline no card com suporte a clique para ampliar.

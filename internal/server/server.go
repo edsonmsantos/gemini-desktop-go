@@ -28,6 +28,7 @@ import (
 	"geminidesktop-go/internal/skills"
 	"geminidesktop-go/internal/store"
 
+	"github.com/edsonmsantos/browser-bridge/policymgr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -98,9 +99,11 @@ type Server struct {
 	port        int
 	turnTimeout time.Duration
 
-	browserBridgePort      int
-	browserBridgeTokenPath string
-	screenshotsBaseDir     string
+	browserBridgePort          int
+	browserBridgeTokenPath     string
+	browserBridgeUpdateBaseURL string
+	policyWriter               policymgr.PolicyWriter
+	screenshotsBaseDir         string
 
 	mcpClient *mcp.Client
 	mcpMu     sync.Mutex
@@ -428,6 +431,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/browser/status", s.handleBrowserStatus)
 	s.mux.HandleFunc("GET /api/browser/approvals", s.handleBrowserApprovals)
 	s.mux.HandleFunc("POST /api/browser/approvals/{id}", s.handleBrowserResolveApproval)
+	s.mux.HandleFunc("GET /api/browser/wizard/state", s.handleBrowserWizardState)
+	s.mux.HandleFunc("POST /api/browser/install-policy", s.handleBrowserInstallPolicy)
+	s.mux.HandleFunc("POST /api/browser/remove-policy", s.handleBrowserRemovePolicy)
 
 	// Biblioteca de prompts salvos
 	s.mux.HandleFunc("GET /api/prompts", s.handleListPrompts)

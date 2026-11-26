@@ -19,15 +19,22 @@ type AgentConfig struct {
 
 // Config representa as configurações locais do Gemini Desktop
 type Config struct {
-	Agent                  AgentConfig `json:"agent"`
-	CLIPath                string      `json:"cliPath,omitempty"` // Mantido para retrocompatibilidade
-	DefaultCWD             string      `json:"defaultCwd"`
-	Port                   int         `json:"port"`
-	TempWorkspacesDir      string      `json:"tempWorkspacesDir,omitempty"`
-	Notifications          *bool       `json:"notifications,omitempty"` // nil = habilitado (default)
-	TurnTimeoutSec         *int        `json:"turnTimeoutSec,omitempty"`
-	BrowserBridgePort      int         `json:"browserBridgePort,omitempty"`
-	BrowserBridgeTokenPath string      `json:"browserBridgeTokenPath,omitempty"`
+	Agent                      AgentConfig `json:"agent"`
+	CLIPath                    string      `json:"cliPath,omitempty"` // Mantido para retrocompatibilidade
+	DefaultCWD                 string      `json:"defaultCwd"`
+	Port                       int         `json:"port"`
+	TempWorkspacesDir          string      `json:"tempWorkspacesDir,omitempty"`
+	Notifications              *bool       `json:"notifications,omitempty"` // nil = habilitado (default)
+	TurnTimeoutSec             *int        `json:"turnTimeoutSec,omitempty"`
+	BrowserBridgePort          int         `json:"browserBridgePort,omitempty"`
+	BrowserBridgeTokenPath     string      `json:"browserBridgeTokenPath,omitempty"`
+	BrowserBridgeInProcess     *bool       `json:"browserBridgeInProcess,omitempty"`
+	BrowserBridgeUpdateBaseURL string      `json:"browserBridgeUpdateBaseURL,omitempty"`
+}
+
+// BridgeInProcess retorna se o daemon do browser-bridge deve rodar em-processo (padrão true)
+func (c *Config) BridgeInProcess() bool {
+	return c == nil || c.BrowserBridgeInProcess == nil || *c.BrowserBridgeInProcess
 }
 
 // NotificationsEnabled retorna se notificações nativas de fim de turno estão habilitadas

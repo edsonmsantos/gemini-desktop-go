@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"geminidesktop-go/internal/acp"
+	"geminidesktop-go/internal/bridge"
 	"geminidesktop-go/internal/config"
 	"geminidesktop-go/internal/server"
 	"geminidesktop-go/internal/store"
@@ -48,6 +49,7 @@ type App struct {
 	httpServer *http.Server
 	port       int
 	cfg        *config.Config
+	bridgeStop func()
 }
 
 // NewApp cria uma nova instância de App Wails
@@ -183,6 +185,17 @@ func (a *App) startup(ctx context.Context) {
 	a.server.SetAgentBinary(cfg.Agent.Command)
 	a.server.SetPort(a.port)
 	a.server.SetBrowserBridge(cfg.GetBrowserBridgePort(), cfg.GetBrowserBridgeTokenPath())
+	if cfg.BrowserBridgeUpdateBaseURL != "" {
+		a.server.SetBrowserBridgeUpdateBaseURL(cfg.BrowserBridgeUpdateBaseURL)
+	}
+
+	go func() {
+		stop, err := bridge.StartInProcess(cfg)
+		if err != nil {
+			log.Printf("[bridge] aviso ao iniciar daemon in-process: %v", err)
+		}
+		a.bridgeStop = stop
+	}()
 	addr := fmt.Sprintf("127.0.0.1:%d", a.port)
 	a.httpServer = &http.Server{
 		Addr:    addr,
@@ -210,6 +223,9 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	if a.client != nil {
 		_ = a.client.Close()
+	}
+	if a.bridgeStop != nil {
+		a.bridgeStop()
 	}
 	if a.store != nil {
 		_ = a.store.Close()
