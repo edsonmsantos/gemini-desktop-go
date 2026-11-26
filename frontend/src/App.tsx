@@ -5,6 +5,7 @@ import { ChatView } from './components/ChatView'
 import { SettingsModal } from './components/SettingsModal'
 import { NewConversationModal } from './components/NewConversationModal'
 import { PermissionDialog } from './components/PermissionDialog'
+import { BrowserApprovalModal } from './components/BrowserApprovalModal'
 import { CommandCenterModal } from './components/CommandCenterModal'
 import { OnboardingModal } from './components/OnboardingModal'
 import {
@@ -24,10 +25,14 @@ import {
   regenerateConversation,
   respondPermission,
   cancelTurn,
+  fetchBrowserStatus,
+  fetchBrowserApprovals,
+  resolveBrowserApproval,
   wsManager
 } from './api'
 import {
   AgentInfo,
+  BrowserApproval,
   Conversation,
   Message,
   Model,
@@ -83,6 +88,10 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
   const [serverPort, setServerPort] = useState<number>(8399)
   const [agentCmd, setAgentCmd] = useState<string>('')
 
+  // Aprovações da Ponte do Navegador (Modo Ask)
+  const [browserApprovals, setBrowserApprovals] = useState<BrowserApproval[]>([])
+  const [browserApprovalsPending, setBrowserApprovalsPending] = useState<number>(0)
+
   // Drag & drop nativo (Wails ≥ v2.16): caminhos absolutos dos arquivos soltos
   useEffect(() => {
     const rt = window.runtime as { OnFileDrop?: (cb: (x: number, y: number, paths: string[]) => void, useDropTarget?: boolean) => void } | undefined
@@ -130,6 +139,53 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
   }
+
+  // Polling de status do navegador para verificar se há aprovações pendentes (modo ask)
+  useEffect(() => {
+    let active = true
+
+    const checkStatus = async () => {
+      const st = await fetchBrowserStatus()
+      if (!active) return
+      setBrowserApprovalsPending(st.approvalsPending || 0)
+    }
+
+    void checkStatus()
+    const timer = setInterval(checkStatus, 15000)
+
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  // Quando approvalsPending > 0 ou lista não vazia: polling 2s
+  useEffect(() => {
+    let active = true
+
+    if (browserApprovalsPending <= 0 && browserApprovals.length === 0) {
+      return
+    }
+
+    const pollApprovals = async () => {
+      const list = await fetchBrowserApprovals()
+      if (!active) return
+      setBrowserApprovals(list)
+    }
+
+    void pollApprovals()
+    const timer = setInterval(pollApprovals, 2000)
+
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [browserApprovalsPending, browserApprovals.length])
+
+  const handleRespondBrowserApproval = useCallback(async (id: string, approve: boolean) => {
+    setBrowserApprovals((prev) => prev.filter((item) => item.id !== id))
+    await resolveBrowserApproval(id, approve)
+  }, [])
 
   // Carregar dados iniciais do backend
   const loadInitialData = useCallback(async () => {
@@ -791,6 +847,12 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
         onRespond={handleRespondPermission}
         onRejectWithFeedback={handleRejectWithFeedback}
         disabled={!isStreaming}
+      />
+
+      {/* Modal de Aprovação de Ação do Navegador (Modo Ask) */}
+      <BrowserApprovalModal
+        approval={browserApprovals[0] || null}
+        onRespond={handleRespondBrowserApproval}
       />
 
       {/* Command Center Ctrl+K */}

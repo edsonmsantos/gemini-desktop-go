@@ -182,6 +182,7 @@ func (a *App) startup(ctx context.Context) {
 	a.server.SetTurnTimeout(cfg.TurnTimeout())
 	a.server.SetAgentBinary(cfg.Agent.Command)
 	a.server.SetPort(a.port)
+	a.server.SetBrowserBridge(cfg.GetBrowserBridgePort(), cfg.GetBrowserBridgeTokenPath())
 	addr := fmt.Sprintf("127.0.0.1:%d", a.port)
 	a.httpServer = &http.Server{
 		Addr:    addr,

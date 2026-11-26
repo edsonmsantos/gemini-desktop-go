@@ -19,13 +19,15 @@ type AgentConfig struct {
 
 // Config representa as configurações locais do Gemini Desktop
 type Config struct {
-	Agent             AgentConfig `json:"agent"`
-	CLIPath           string      `json:"cliPath,omitempty"` // Mantido para retrocompatibilidade
-	DefaultCWD        string      `json:"defaultCwd"`
-	Port              int         `json:"port"`
-	TempWorkspacesDir string      `json:"tempWorkspacesDir,omitempty"`
-	Notifications     *bool       `json:"notifications,omitempty"` // nil = habilitado (default)
-	TurnTimeoutSec    *int        `json:"turnTimeoutSec,omitempty"`
+	Agent                  AgentConfig `json:"agent"`
+	CLIPath                string      `json:"cliPath,omitempty"` // Mantido para retrocompatibilidade
+	DefaultCWD             string      `json:"defaultCwd"`
+	Port                   int         `json:"port"`
+	TempWorkspacesDir      string      `json:"tempWorkspacesDir,omitempty"`
+	Notifications          *bool       `json:"notifications,omitempty"` // nil = habilitado (default)
+	TurnTimeoutSec         *int        `json:"turnTimeoutSec,omitempty"`
+	BrowserBridgePort      int         `json:"browserBridgePort,omitempty"`
+	BrowserBridgeTokenPath string      `json:"browserBridgeTokenPath,omitempty"`
 }
 
 // NotificationsEnabled retorna se notificações nativas de fim de turno estão habilitadas
@@ -47,6 +49,26 @@ func (c *Config) TurnTimeout() time.Duration {
 		return 0
 	}
 	return time.Duration(sec) * time.Second
+}
+
+// GetBrowserBridgePort retorna a porta da ponte do navegador (padrão 9223)
+func (c *Config) GetBrowserBridgePort() int {
+	if c != nil && c.BrowserBridgePort > 0 {
+		return c.BrowserBridgePort
+	}
+	return 9223
+}
+
+// GetBrowserBridgeTokenPath retorna o caminho configurado ou padrão do token da ponte
+func (c *Config) GetBrowserBridgeTokenPath() string {
+	if c != nil && c.BrowserBridgeTokenPath != "" {
+		return c.BrowserBridgeTokenPath
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".browser-bridge", "token.txt")
 }
 
 // GetTempWorkspacesDir retorna o diretório base para workspaces temporários

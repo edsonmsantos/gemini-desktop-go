@@ -139,6 +139,17 @@ Para usar o Gemini CLI oficial:
      | `GET` | `/api/mcp` | Lista servidores MCP registrados via CLI `agy mcp list` com status de disponibilidade |
      | `POST` | `/api/mcp/{name}/toggle` | Habilita ou desabilita um servidor MCP via CLI `agy mcp enable/disable` |
      | `GET` | `/api/search` | Busca full-text nas conversas e mensagens com snippets de contexto e limite configurável |
+     | `GET` | `/api/browser/status` | Retorna o status de conexão da ponte do navegador (daemon Go ou Node na porta 9223) |
+     | `GET` | `/api/browser/approvals` | Lista pedidos de aprovação pendentes da ponte do navegador (modo ask) |
+     | `POST` | `/api/browser/approvals/{id}` | Resolve uma aprovação pendente (`approve: bool`) na ponte do navegador |
+
+### Integração com o Navegador (browser-bridge)
+
+O GeminiDesktop possui integração nativa com o ecossistema **browser-bridge** (rodando localmente na porta 9223). O app atua como cliente HTTP transparente da ponte (com autenticação Bearer via `~/.browser-bridge/token.txt` no daemon Go e fallback automático para o daemon Node):
+- **Status Pill em Tempo Real**: pill visual no rodapé indica o status de prontidão da ponte e da extensão do navegador.
+- **BrowserToolCard**: chamadas MCP para `browser-bridge` recebem visualização humanizada com títulos em português (`Ler página`, `Capturar tela`, `Abrir URL`), badges de contexto e segurança (`trusted`, `modal`, `falhou`), além de argumentos e saídas colapsáveis.
+- **Screenshots Inline**: ao concluir uma captura de tela (`browser_screenshot` ou `browser_som_screenshot`), a imagem mais recente do cache é copiada para `~/.geminidesktop/screenshots/<conversationId>/` e renderizada inline no card com suporte a clique para ampliar.
+- **Aprovações Nativas (Modo Ask)**: se a ponte opera em modo ask (daemon Go expondo `/api/approvals`), o aplicativo faz polling e exibe um modal nativo para Permitir ou Negar a ação; se o daemon for Node (sem endpoint de aprovações), a funcionalidade permanece ocultada de forma transparente.
 
 5. **`frontend/` (React + Vite + TypeScript)**:
    - Interface desktop fiel ao Gemini (tema dual dark `#131314` + light, glow radial azul, tipografia Google Sans).

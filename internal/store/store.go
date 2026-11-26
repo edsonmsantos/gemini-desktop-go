@@ -497,6 +497,45 @@ func (s *Store) UpsertToolCallMessage(convID string, toolCallID, status, title, 
 	}, nil
 }
 
+// AttachScreenshotToToolCall associa o caminho absoluto de uma captura de tela
+// ao meta JSON da mensagem tool_call correspondente na conversa.
+func (s *Store) AttachScreenshotToToolCall(convID, toolCallID, path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var id int64
+	var metaStr string
+	err := s.db.QueryRow(`SELECT id, meta FROM messages
+		WHERE conversation_id = ? AND role = 'tool_call'
+		  AND json_extract(meta, '$.toolCallId') = ?
+		LIMIT 1`, convID, toolCallID).Scan(&id, &metaStr)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("tool_call %q não encontrado na conversa %q", toolCallID, convID)
+	}
+	if err != nil {
+		return fmt.Errorf("falha ao consultar tool_call para anexar screenshot: %w", err)
+	}
+
+	metaObj := make(map[string]interface{})
+	if metaStr != "" {
+		_ = json.Unmarshal([]byte(metaStr), &metaObj)
+	}
+	metaObj["screenshot"] = path
+
+	metaBytes, err := json.Marshal(metaObj)
+	if err != nil {
+		return fmt.Errorf("falha ao serializar meta com screenshot: %w", err)
+	}
+
+	now := time.Now().UnixMilli()
+	if _, err := s.db.Exec(`UPDATE messages SET meta = ? WHERE id = ?`, string(metaBytes), id); err != nil {
+		return fmt.Errorf("falha ao atualizar meta com screenshot: %w", err)
+	}
+	_, _ = s.db.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now, convID)
+
+	return nil
+}
+
 // UpdateAssistantTurnDone finaliza o turno anotando stopReason na última mensagem assistant
 func (s *Store) UpdateAssistantTurnDone(convID string, stopReason string) error {
 	s.mu.Lock()

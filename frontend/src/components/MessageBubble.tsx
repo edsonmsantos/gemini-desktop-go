@@ -3,6 +3,7 @@ import { GeminiSparkle, FileIcon } from './icons'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallCard } from './ToolCallCard'
+import { BrowserToolCard } from './BrowserToolCard'
 import { PermissionCard } from './PermissionCard'
 import { PlanCard } from './PlanCard'
 import { Message, PermissionRequest, Plan, SourceResolution, ToolCall } from '../types'
@@ -398,6 +399,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }
 
   if (message.role === 'tool_call' && toolCallData) {
+    const rawInput = (toolCallData.rawInput || {}) as Record<string, unknown>
+    const isBrowserBridge =
+      toolCallData.name === 'call_mcp_tool' && rawInput.ServerName === 'browser-bridge'
+
+    if (isBrowserBridge) {
+      return <BrowserToolCard toolCall={toolCallData} />
+    }
     return <ToolCallCard toolCall={toolCallData} />
   }
 
