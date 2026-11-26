@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"geminidesktop-go/internal/acp"
+	"geminidesktop-go/internal/bridge"
 	"geminidesktop-go/internal/config"
 	"geminidesktop-go/internal/server"
 	"geminidesktop-go/internal/store"
@@ -100,6 +101,14 @@ func main() {
 	srv.SetAgentBinary(agentCmd)
 	srv.SetPort(port)
 	srv.SetBrowserBridge(cfg.GetBrowserBridgePort(), cfg.GetBrowserBridgeTokenPath())
+	if cfg.BrowserBridgeUpdateBaseURL != "" {
+		srv.SetBrowserBridgeUpdateBaseURL(cfg.BrowserBridgeUpdateBaseURL)
+	}
+
+	stopBridge, err := bridge.StartInProcess(cfg)
+	if err != nil {
+		log.Printf("[bridge] aviso ao iniciar daemon in-process: %v", err)
+	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	httpServer := &http.Server{
 		Addr:    addr,
@@ -123,5 +132,8 @@ func main() {
 	defer shutdownCancel()
 	_ = httpServer.Shutdown(shutdownCtx)
 	_ = client.Close()
+	if stopBridge != nil {
+		stopBridge()
+	}
 	log.Println("[GeminiDesktop] Encerrado.")
 }

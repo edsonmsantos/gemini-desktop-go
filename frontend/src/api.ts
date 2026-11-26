@@ -1,4 +1,4 @@
-import { AgentInfo, Artifact, BrowserApproval, BrowserStatus, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, FolderInfo, MCPResponse, MCPServer, Message, Model, SavedPrompt, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
+import { AgentInfo, Artifact, BrowserApproval, BrowserStatus, BrowserWizardState, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, FolderInfo, InstallPolicyResponse, MCPResponse, MCPServer, Message, Model, RemovePolicyResponse, SavedPrompt, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
 
 declare module 'react' {
   // Permite custom properties (--var) em objetos de estilo
@@ -671,6 +671,41 @@ export async function resolveBrowserApproval(id: string, approve: boolean): Prom
     return false
   }
 }
+
+export async function fetchBrowserWizardState(): Promise<BrowserWizardState> {
+  const res = await fetch(`${getBaseURL()}/api/browser/wizard/state`)
+  if (!res.ok) {
+    throw new Error('Falha ao obter estado do assistente do navegador')
+  }
+  return res.json()
+}
+
+export async function installBrowserPolicy(browser: string, updateUrl?: string): Promise<InstallPolicyResponse> {
+  const res = await fetch(`${getBaseURL()}/api/browser/install-policy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ browser, updateUrl })
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || 'Falha ao instalar política do navegador')
+  }
+  return res.json()
+}
+
+export async function removeBrowserPolicy(browser: string): Promise<RemovePolicyResponse> {
+  const res = await fetch(`${getBaseURL()}/api/browser/remove-policy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ browser })
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || 'Falha ao remover política do navegador')
+  }
+  return res.json()
+}
+
 
 
 

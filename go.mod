@@ -3,12 +3,15 @@ module geminidesktop-go
 go 1.26.4
 
 require (
+	github.com/edsonmsantos/browser-bridge v0.0.0-00010101000000-000000000000
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/wailsapp/wails/v2 v2.17.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.63.0
 )
+
+replace github.com/edsonmsantos/browser-bridge => ../../browser-bridge
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect

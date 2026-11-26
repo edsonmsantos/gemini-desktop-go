@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { CloseIcon, RefreshIcon, SpinnerIcon } from './icons'
 import { DiagnosticsInfo } from '../types'
 import { fetchDiagnostics, markOnboardingDone } from '../api'
+import { BrowserSetupWizard } from './BrowserSetupWizard'
 
 interface OnboardingModalProps {
   isOpen: boolean
@@ -55,7 +56,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
   }
 
   const handleNext = () => {
-    if (currentStep < 3) {
+    if (currentStep < 4) {
       setCurrentStep((prev) => prev + 1)
     } else {
       handleFinish()
@@ -112,7 +113,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              {[1, 2, 3].map((step) => {
+              {[1, 2, 3, 4].map((step) => {
                 const isActive = step === currentStep
                 const isPassed = step < currentStep
                 return (
@@ -145,7 +146,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                     >
                       {isPassed ? '✓' : step}
                     </div>
-                    {step < 3 && (
+                    {step < 4 && (
                       <div
                         style={{
                           width: 28,
@@ -159,7 +160,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                 )
               })}
               <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
-                Passo {currentStep} de 3
+                Passo {currentStep} de 4
               </span>
             </div>
           </div>
@@ -672,6 +673,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
               </div>
             </div>
           )}
+
+          {/* PASSO 4: Integração com o Navegador */}
+          {currentStep === 4 && (
+            <BrowserSetupWizard isEmbeddedInModal={true} />
+          )}
         </div>
 
         {/* Rodapé com botões de navegação */}
@@ -725,7 +731,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
               </button>
             )}
 
-            {currentStep < 3 ? (
+            {currentStep < 4 ? (
               <button
                 type="button"
                 onClick={handleNext}

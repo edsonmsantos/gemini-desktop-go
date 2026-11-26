@@ -219,3 +219,28 @@ export interface BrowserApproval {
   [key: string]: unknown
 }
 
+export interface BrowserWizardBrowser {
+  browser: string
+  detected: boolean
+  policyApplied: boolean
+}
+
+export interface BrowserWizardState {
+  agentFound: boolean
+  browsers: BrowserWizardBrowser[]
+  extensionConnected: boolean
+  updateBaseURL: string
+}
+
+export interface InstallPolicyResponse {
+  ok: boolean
+  target: string
+  nextSteps: string
+}
+
+export interface RemovePolicyResponse {
+  ok: boolean
+  target: string
+}
+
+
