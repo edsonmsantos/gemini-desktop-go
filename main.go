@@ -99,6 +99,7 @@ func main() {
 	srv.SetTurnTimeout(cfg.TurnTimeout())
 	srv.SetAgentBinary(agentCmd)
 	srv.SetPort(port)
+	srv.SetBrowserBridge(cfg.GetBrowserBridgePort(), cfg.GetBrowserBridgeTokenPath())
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	httpServer := &http.Server{
 		Addr:    addr,

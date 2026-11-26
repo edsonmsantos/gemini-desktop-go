@@ -98,6 +98,10 @@ type Server struct {
 	port        int
 	turnTimeout time.Duration
 
+	browserBridgePort      int
+	browserBridgeTokenPath string
+	screenshotsBaseDir     string
+
 	mcpClient *mcp.Client
 	mcpMu     sync.Mutex
 	mcpCache  mcpCacheEntry
@@ -126,19 +130,20 @@ func NewServer(client *acp.Client, defaultCwd string, staticFS fs.FS) *Server {
 // NewServerV2 inicializa o servidor com persistência SQLite
 func NewServerV2(client *acp.Client, defaultCwd string, staticFS fs.FS, st *store.Store) *Server {
 	s := &Server{
-		client:         client,
-		defaultCWD:     defaultCwd,
-		staticFS:       staticFS,
-		store:          st,
-		mux:            http.NewServeMux(),
-		convSessions:   make(map[string]string),
-		sessConvs:      make(map[string]string),
-		orphanSessions: make(map[string]bool),
-		wsClients:      make(map[*websocket.Conn]bool),
-		skillsCache:    make(map[string]skillsCacheEntry),
-		port:           8399,
-		turnTimeout:    900 * time.Second,
-		mcpClient:      mcp.NewClient("agy"),
+		client:            client,
+		defaultCWD:        defaultCwd,
+		staticFS:          staticFS,
+		store:             st,
+		mux:               http.NewServeMux(),
+		convSessions:      make(map[string]string),
+		sessConvs:         make(map[string]string),
+		orphanSessions:    make(map[string]bool),
+		wsClients:         make(map[*websocket.Conn]bool),
+		skillsCache:       make(map[string]skillsCacheEntry),
+		port:              8399,
+		turnTimeout:       900 * time.Second,
+		browserBridgePort: 9223,
+		mcpClient:         mcp.NewClient("agy"),
 	}
 
 	if s.client != nil {
@@ -199,6 +204,21 @@ func (s *Server) SetTurnTimeout(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.turnTimeout = d
+}
+
+// SetBrowserBridge configura a porta e o caminho do token da ponte do navegador
+func (s *Server) SetBrowserBridge(port int, tokenPath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.browserBridgePort = port
+	s.browserBridgeTokenPath = tokenPath
+}
+
+// SetScreenshotsBaseDir configura o diretório base para salvar screenshots
+func (s *Server) SetScreenshotsBaseDir(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.screenshotsBaseDir = dir
 }
 
 // SetUserSkillsDir define o diretório raiz das skills de usuário (global)
@@ -403,6 +423,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/open-url", s.handleOpenURL)
 	s.mux.HandleFunc("POST /api/files/content", s.handleFileContent)
 	s.mux.HandleFunc("POST /api/sources/resolve", s.handleResolveSources)
+
+	// Integração com Navegador (Browser Bridge)
+	s.mux.HandleFunc("GET /api/browser/status", s.handleBrowserStatus)
+	s.mux.HandleFunc("GET /api/browser/approvals", s.handleBrowserApprovals)
+	s.mux.HandleFunc("POST /api/browser/approvals/{id}", s.handleBrowserResolveApproval)
 
 	// Biblioteca de prompts salvos
 	s.mux.HandleFunc("GET /api/prompts", s.handleListPrompts)
@@ -1245,6 +1270,37 @@ func (s *Server) startTurn(id, sessID string, contentBlocks []interface{}, event
 			case "tool_call":
 				if ev.ToolCall != nil && persist {
 					_, _ = s.store.UpsertToolCallMessage(id, ev.ToolCall.ID, string(ev.ToolCall.Status), ev.ToolCall.Title, ev.ToolCall.Kind, ev.ToolCall.Name, ev.ToolCall.RawInput, ev.ToolCall.RawOutput)
+
+					if ev.ToolCall.Status == "completed" {
+						isScreenshot := false
+						if strings.Contains(ev.ToolCall.Title, "browser_screenshot") || strings.Contains(ev.ToolCall.Title, "browser_som_screenshot") {
+							isScreenshot = true
+						}
+						if ev.ToolCall.RawInput != nil {
+							if tn, ok := ev.ToolCall.RawInput["ToolName"].(string); ok {
+								if tn == "browser_screenshot" || tn == "browser_som_screenshot" {
+									isScreenshot = true
+								}
+							}
+						}
+						if isScreenshot {
+							go func(convID, toolCallID string, sinceMs int64, tc acp.ToolCall) {
+								shotPath, err := s.resolveLatestScreenshot(context.Background(), convID, sinceMs)
+								if err != nil {
+									log.Printf("[browser] falha ao resolver screenshot para tool_call %s: %v", toolCallID, err)
+									return
+								}
+								if shotPath == "" {
+									return
+								}
+								if err := s.store.AttachScreenshotToToolCall(convID, toolCallID, shotPath); err != nil {
+									log.Printf("[browser] falha ao anexar screenshot na store: %v", err)
+									return
+								}
+								s.broadcastBrowserToolCallScreenshot(convID, tc, shotPath)
+							}(id, ev.ToolCall.ID, time.Now().UnixMilli(), *ev.ToolCall)
+						}
+					}
 				}
 			case "plan":
 				if ev.Plan != nil {
@@ -1884,7 +1940,11 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 // Broadcast envia um frame JSON para todos os clientes conectados ao WebSocket
 func (s *Server) Broadcast(ev acp.Event) {
-	data, err := json.Marshal(ev)
+	s.broadcastJSON(ev)
+}
+
+func (s *Server) broadcastJSON(v interface{}) {
+	data, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
@@ -1913,4 +1973,47 @@ func (s *Server) Broadcast(ev acp.Event) {
 			s.clientsMu.Unlock()
 		}
 	}
+}
+
+func (s *Server) handleBrowserStatus(w http.ResponseWriter, r *http.Request) {
+	status := s.browserStatus(r.Context())
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(status)
+}
+
+func (s *Server) handleBrowserApprovals(w http.ResponseWriter, r *http.Request) {
+	list, status, err := s.pollApprovals(r.Context())
+	if status == http.StatusNotFound {
+		http.Error(w, "approvals não disponível na ponte", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(list)
+}
+
+func (s *Server) handleBrowserResolveApproval(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "id obrigatório", http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		Approve bool `json:"approve"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "payload inválido", http.StatusBadRequest)
+		return
+	}
+
+	status, err := s.resolveApproval(r.Context(), id, body.Approve)
+	if err != nil && status == http.StatusBadGateway {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.WriteHeader(status)
 }

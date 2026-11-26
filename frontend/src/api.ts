@@ -1,4 +1,4 @@
-import { AgentInfo, Artifact, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, FolderInfo, MCPResponse, MCPServer, Message, Model, SavedPrompt, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
+import { AgentInfo, Artifact, BrowserApproval, BrowserStatus, CapabilitiesResponse, Conversation, DiagnosticsInfo, FileContent, FolderInfo, MCPResponse, MCPServer, Message, Model, SavedPrompt, SearchResult, SkillsResponse, SourceResolution, Workspace, WSEvent } from './types'
 
 declare module 'react' {
   // Permite custom properties (--var) em objetos de estilo
@@ -619,6 +619,57 @@ export async function deleteFolder(name: string): Promise<{ count: number }> {
     throw new Error(errText || 'Falha ao excluir pasta')
   }
   return res.json()
+}
+
+export async function fetchBrowserStatus(): Promise<BrowserStatus> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/browser/status`)
+    if (!res.ok) {
+      return {
+        connected: false,
+        extensionConnected: false,
+        port: 9223,
+        approvalsPending: 0,
+        daemon: 'unknown',
+        reason: 'Falha ao verificar status'
+      }
+    }
+    return res.json()
+  } catch {
+    return {
+      connected: false,
+      extensionConnected: false,
+      port: 9223,
+      approvalsPending: 0,
+      daemon: 'unknown',
+      reason: 'Ponte não encontrada'
+    }
+  }
+}
+
+export async function fetchBrowserApprovals(): Promise<BrowserApproval[]> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/browser/approvals`)
+    if (!res.ok) {
+      return []
+    }
+    return (await res.json()) ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function resolveBrowserApproval(id: string, approve: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/browser/approvals/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approve })
+    })
+    return res.ok
+  } catch {
+    return false
+  }
 }
 
 

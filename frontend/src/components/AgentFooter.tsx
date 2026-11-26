@@ -1,6 +1,7 @@
 import React from 'react'
 import { SettingsIcon } from './icons'
 import { ThemeToggle } from './ThemeToggle'
+import { BrowserStatusPill } from './BrowserStatusPill'
 import { AgentInfo } from '../types'
 
 interface AgentFooterProps {
@@ -107,8 +108,9 @@ export const AgentFooter: React.FC<AgentFooterProps> = ({
         </div>
       )}
 
-      {/* Botões de Ação do Rodapé: Tema + Configurações */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: email ? 0 : 'auto' }}>
+      {/* Botões de Ação do Rodapé: Pill Navegador + Tema + Configurações */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: email ? 0 : 'auto', flexShrink: 0 }}>
+        <BrowserStatusPill />
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <button
           onClick={onOpenSettings}

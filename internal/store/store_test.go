@@ -370,3 +370,61 @@ func TestStore_DeleteMessagesFrom(t *testing.T) {
 		t.Fatalf("esperava 0 mensagens, obteve %d", len(msgs))
 	}
 }
+
+func TestStore_AttachScreenshotToToolCall(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "screenshot_test.db")
+
+	st, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("falha ao inicializar store: %v", err)
+	}
+	defer st.Close()
+
+	convID := "conv-shot-1"
+	if err := st.CreateConversation(&Conversation{
+		ID:    convID,
+		Title: "Teste Screenshot",
+		Agent: "agy",
+	}); err != nil {
+		t.Fatalf("falha ao criar conversa: %v", err)
+	}
+
+	// Inserir tool call completed
+	_, err = st.UpsertToolCallMessage(convID, "tc-shot-1", "completed", "browser_screenshot", "execute", "call_mcp_tool", map[string]interface{}{"ToolName": "browser_screenshot"}, "ok")
+	if err != nil {
+		t.Fatalf("falha ao upsert tool call: %v", err)
+	}
+
+	// Anexa screenshot com sucesso
+	shotPath := "/home/edson/.geminidesktop/screenshots/conv-shot-1/1700000000.png"
+	if err := st.AttachScreenshotToToolCall(convID, "tc-shot-1", shotPath); err != nil {
+		t.Fatalf("falha ao anexar screenshot: %v", err)
+	}
+
+	// GetMessages deve conter meta.screenshot
+	msgs, err := st.GetMessages(convID)
+	if err != nil {
+		t.Fatalf("falha ao buscar mensagens: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("esperava 1 mensagem, obteve %d", len(msgs))
+	}
+
+	var meta map[string]interface{}
+	if err := json.Unmarshal([]byte(msgs[0].Meta), &meta); err != nil {
+		t.Fatalf("meta inválido: %v", err)
+	}
+	if meta["screenshot"] != shotPath {
+		t.Fatalf("esperava screenshot=%s, obteve %v", shotPath, meta["screenshot"])
+	}
+	if meta["toolCallId"] != "tc-shot-1" || meta["status"] != "completed" {
+		t.Fatalf("outros campos de meta foram corrompidos: %+v", meta)
+	}
+
+	// Tentar anexar para tool call inexistente deve retornar erro claro
+	errInexistente := st.AttachScreenshotToToolCall(convID, "tc-inexistente", shotPath)
+	if errInexistente == nil {
+		t.Fatalf("esperava erro ao anexar screenshot em tool call inexistente, obteve nil")
+	}
+}

@@ -8,6 +8,7 @@ export interface ToolCall {
   name?: string
   rawInput?: Record<string, unknown>
   rawOutput?: string
+  screenshot?: string
 }
 
 export interface PlanEntry {
@@ -196,5 +197,25 @@ export interface SavedPrompt {
   content: string
   createdAt?: number
   updatedAt?: number
+}
+
+export interface BrowserStatus {
+  connected: boolean
+  mode?: string
+  extensionConnected: boolean
+  port: number
+  approvalsPending: number
+  daemon: 'go' | 'node' | 'unknown'
+  reason?: string
+}
+
+export interface BrowserApproval {
+  id: string
+  tool?: string
+  name?: string
+  args?: Record<string, unknown>
+  arguments?: Record<string, unknown>
+  createdAt?: number
+  [key: string]: unknown
 }
 
