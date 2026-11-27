@@ -14,6 +14,10 @@ export function OpenArtifact(arg1) {
   return window['go']['main']['App']['OpenArtifact'](arg1);
 }
 
+export function Quit() {
+  return window['go']['main']['App']['Quit']();
+}
+
 export function SavePdfDialog(arg1, arg2) {
   return window['go']['main']['App']['SavePdfDialog'](arg1, arg2);
 }
@@ -24,4 +28,8 @@ export function SelectDirectory() {
 
 export function SelectFiles() {
   return window['go']['main']['App']['SelectFiles']();
+}
+
+export function Show() {
+  return window['go']['main']['App']['Show']();
 }

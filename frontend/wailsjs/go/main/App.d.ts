@@ -8,8 +8,12 @@ export function GetServerURL():Promise<string>;
 
 export function OpenArtifact(arg1:string):Promise<string>;
 
+export function Quit():Promise<void>;
+
 export function SavePdfDialog(arg1:string,arg2:string):Promise<string>;
 
 export function SelectDirectory():Promise<string>;
 
 export function SelectFiles():Promise<Array<string>>;
+
+export function Show():Promise<void>;

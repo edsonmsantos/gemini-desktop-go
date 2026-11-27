@@ -9,9 +9,12 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	stdRuntime "runtime"
 	"strings"
 	"syscall"
 	"time"
+
+	"fyne.io/systray"
 
 	"geminidesktop-go/internal/acp"
 	"geminidesktop-go/internal/bridge"
@@ -33,6 +36,9 @@ var assets embed.FS
 //go:embed build/appicon.png
 var appIcon []byte
 
+//go:embed build/windows/icon.ico
+var appIconIco []byte
+
 // AppConfigResponse expõe detalhes da configuração para a UI
 type AppConfigResponse struct {
 	Port    int    `json:"port"`
@@ -52,11 +58,34 @@ type App struct {
 	sessionToken string
 	cfg          *config.Config
 	bridgeStop   func()
+	trayStop     func()
 }
 
 // NewApp cria uma nova instância de App Wails
 func NewApp() *App {
 	return &App{}
+}
+
+// Quit encerra a aplicação completamente (sobrepondo o HideWindowOnClose)
+func (a *App) Quit() {
+	if a.ctx != nil {
+		wailsRuntime.Quit(a.ctx)
+	}
+}
+
+// Show exibe e desminimiza a janela principal trazendo-a para o primeiro plano
+func (a *App) Show() {
+	if a.ctx != nil {
+		wailsRuntime.WindowShow(a.ctx)
+		wailsRuntime.WindowUnminimise(a.ctx)
+	}
+}
+
+func (a *App) getTrayIcon() []byte {
+	if stdRuntime.GOOS == "windows" && len(appIconIco) > 0 {
+		return appIconIco
+	}
+	return appIcon
 }
 
 // GetServerURL retorna a URL base do servidor HTTP local
@@ -245,10 +274,62 @@ func (a *App) startup(ctx context.Context) {
 	// Injetar variável no window do Webview com a porta real e token de sessão
 	injectJS := config.FormatInjectJSWithToken(a.port, sessionToken)
 	wailsRuntime.WindowExecJS(ctx, injectJS)
+
+	// Inicia integração com a bandeja do sistema (System Tray) em segundo plano
+	startTray, stopTray := systray.RunWithExternalLoop(func() {
+		iconBytes := a.getTrayIcon()
+		if len(iconBytes) > 0 {
+			systray.SetIcon(iconBytes)
+		}
+		systray.SetTitle("Gemini Desktop")
+		systray.SetTooltip("Gemini Desktop (ACP & Browser Bridge)")
+
+		mShow := systray.AddMenuItem("Abrir Gemini Desktop", "Exibir janela principal")
+		systray.AddSeparator()
+		bridgePort := 9223
+		if a.cfg != nil && a.cfg.GetBrowserBridgePort() > 0 {
+			bridgePort = a.cfg.GetBrowserBridgePort()
+		}
+		mBrowser := systray.AddMenuItem(fmt.Sprintf("Navegador: Ativo (Porta %d)", bridgePort), "Ponte do navegador ativa em background")
+		mBrowser.Disable()
+		systray.AddSeparator()
+		mQuit := systray.AddMenuItem("Sair do Gemini Desktop", "Encerrar aplicação e todos os serviços")
+
+		systray.SetOnTapped(func() {
+			if a.ctx != nil {
+				wailsRuntime.WindowShow(a.ctx)
+				wailsRuntime.WindowUnminimise(a.ctx)
+			}
+		})
+
+		go func() {
+			for {
+				select {
+				case <-mShow.ClickedCh:
+					if a.ctx != nil {
+						wailsRuntime.WindowShow(a.ctx)
+						wailsRuntime.WindowUnminimise(a.ctx)
+					}
+				case <-mQuit.ClickedCh:
+					log.Printf("[Tray] Usuário solicitou encerramento via menu da bandeja.")
+					if a.ctx != nil {
+						wailsRuntime.Quit(a.ctx)
+					}
+				}
+			}
+		}()
+	}, func() {
+		// onExit
+	})
+	startTray()
+	a.trayStop = stopTray
 }
 
 // shutdown limpa os recursos ao fechar a janela
 func (a *App) shutdown(ctx context.Context) {
+	if a.trayStop != nil {
+		a.trayStop()
+	}
 	if a.httpServer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = a.httpServer.Shutdown(shutdownCtx)
@@ -273,11 +354,22 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:     "Gemini Desktop",
-		Width:     1400,
-		Height:    900,
-		MinWidth:  1024,
-		MinHeight: 600,
+		Title:             "Gemini Desktop",
+		Width:             1400,
+		Height:            900,
+		MinWidth:          1024,
+		MinHeight:         600,
+		HideWindowOnClose: true,
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: "com.geminidesktop.app",
+			OnSecondInstanceLaunch: func(secondInstanceData options.SecondInstanceData) {
+				log.Printf("[SingleInstance] Segunda instância detectada. Trazendo janela existente para primeiro plano.")
+				if app.ctx != nil {
+					wailsRuntime.WindowShow(app.ctx)
+					wailsRuntime.WindowUnminimise(app.ctx)
+				}
+			},
+		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

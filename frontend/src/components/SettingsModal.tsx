@@ -480,6 +480,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               </div>
             </div>
+
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                Segundo Plano & Bandeja do Sistema
+              </label>
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  backgroundColor: 'var(--bg-sidebar)',
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: 13,
+                  color: 'var(--text-secondary)',
+                  lineHeight: 1.5
+                }}
+              >
+                Ao fechar a janela no botão <strong>X</strong>, o Gemini Desktop minimiza para a bandeja do sistema para manter o servidor do <strong>Browser Bridge (porta 9223)</strong> ativo e conectado aos seus navegadores.
+              </div>
+            </div>
+
+            <div style={{ marginTop: 6, paddingTop: 14, borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Instância única ativa
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof (window as any).go?.main?.App?.Quit === 'function') {
+                    (window as any).go.main.App.Quit();
+                  } else {
+                    window.close();
+                  }
+                }}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  backgroundColor: 'rgba(234, 67, 53, 0.1)',
+                  border: '1px solid rgba(234, 67, 53, 0.3)',
+                  color: 'var(--status-failed)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                Encerrar Aplicação
+              </button>
+            </div>
           </div>
         )}
 
