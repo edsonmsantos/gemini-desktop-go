@@ -18,6 +18,140 @@ Um cliente desktop nativo (Go + React/Wails) no estilo do Gemini, que conversa c
 - 🌗 **Temas dark/light** fiéis ao Gemini, avatar condicional com plano da conta (ex.: "Google AI Pro")
 - 🔒 Bind exclusivo em `127.0.0.1`, zero telemetria, zero binários de terceiros
 
+## 📦 Instalação & Atualização (Linux & Windows)
+
+### 🐧 Linux (Instalador e Atualizador Automático)
+
+O script `install.sh` gerencia tanto a **primeira instalação** quanto as **atualizações futuras** de forma atômica e segura (finaliza instâncias antigas em execução, preserva dados e atualiza caches de ícones e desktop):
+
+#### 1. Instalação Rápida (via terminal)
+```bash
+curl -fsSL https://raw.githubusercontent.com/edsonmsantos/gemini-desktop-go/main/install.sh | bash -s -- --download
+```
+
+#### 2. Instalação a partir do Repositório ou Clone Local
+```bash
+git clone https://github.com/edsonmsantos/gemini-desktop-go.git
+cd gemini-desktop-go
+chmod +x install.sh
+./install.sh
+```
+> [!TIP]
+> **Como Atualizar:** Basta executar `./install.sh` (ou repetir o comando `curl`) a qualquer momento. O script detecta a instalação existente, finaliza o processo em execução com segurança, substitui o binário de forma atômica e atualiza os atalhos.
+
+#### Opções do `install.sh`:
+| Comando | Descrição |
+|---|---|
+| `./install.sh` | Instala ou atualiza no escopo do usuário atual (`~/.local/share/geminidesktop`, binário em `~/.local/bin`) |
+| `sudo ./install.sh` | Instalação global para todos os usuários do sistema (`/opt/geminidesktop`, binário em `/usr/local/bin`) |
+| `./install.sh --download` | Força o download da versão compilada mais recente diretamente das Releases do GitHub |
+| `./install.sh --uninstall` | Remove completamente o executável, atalhos `.desktop`, links simbólicos e ícones do sistema |
+
+#### Estrutura de Diretórios Criada no Linux:
+- **Binário do App:** `~/.local/share/geminidesktop/geminidesktop-go`
+- **Links Simbólicos no PATH:** `~/.local/bin/geminidesktop-go` e `~/.local/bin/gemini-desktop`
+- **Atalho no Menu Iniciar:** `~/.local/share/applications/geminidesktop-go.desktop`
+- **Ícones do Sistema:** `~/.local/share/icons/hicolor/{16x16..512x512}/apps/geminidesktop-go.png`
+
+---
+
+### 🪟 Windows
+
+- Baixe o executável pré-compilado na [Página de Releases do GitHub](https://github.com/edsonmsantos/gemini-desktop-go/releases/latest):
+  - **`geminidesktop-go.exe`** (Executável nativo PE32+ para arquitetura x86-64, requer WebView2 runtime do Windows 10/11).
+- Execute diretamente ou crie um atalho na Área de Trabalho/Menu Iniciar.
+*(O instalador dedicado para Windows via InnoSetup está em desenvolvimento para as próximas versões).*
+
+---
+
+## 🤖 Guia de Instalação e Operação para Agentes LLM
+
+Se você é um **agente de IA autônomo** (Antigravity CLI, Claude Code, Cursor, OpenCode, AutoGPT ou orquestrador MCP/ACP) encarregado de instalar, configurar ou operar o GeminiDesktop-Go, siga estas diretrizes:
+
+### 1. Pré-requisitos do Host
+Verifique e assegure os pré-requisitos antes da execução:
+- **Biblioteca WebKitGTK (Linux com interface gráfica):**
+  - Debian/Ubuntu: `sudo apt-get install -y libwebkit2gtk-4.1-dev` (ou `libwebkit2gtk-4.1-0` para apenas executar)
+  - Fedora: `sudo dnf install webkit2gtk4.1`
+  - Arch: `sudo pacman -S webkit2gtk-4.1`
+- **Agente ACP Subjacente (Obrigatório):**
+  - O GeminiDesktop atua como cliente ACP e precisa de um executável ACP no `PATH`.
+  - Preferencial: **Antigravity CLI (`agy`)** — verifique se `which agy` retorna um caminho válido e se o usuário está logado (`agy` responde a comandos).
+  - Alternativa: **Gemini CLI (`gemini`)** — via `npm install -g @google/gemini-cli`.
+
+### 2. Instalação Automatizada (Não-Interativa)
+O script de instalação é 100% não-interativo e seguro para automações de agentes:
+```bash
+# Download e instalação direta da última release estável:
+curl -fsSL https://raw.githubusercontent.com/edsonmsantos/gemini-desktop-go/main/install.sh | bash -s -- --download
+```
+Certifique-se de que `~/.local/bin` está no `PATH` da sessão do agente.
+
+### 3. Modo Headless / API Server (`serve`)
+Quando operando em servidores remotos, containers, ambientes sem servidor gráfico (X11/Wayland) ou quando você quiser orquestrar conversas via REST/WebSocket:
+
+```bash
+geminidesktop-go serve --port 8399
+```
+
+> [!IMPORTANT]
+> **Fluxo de Autenticação para Agentes:**
+> - Ao inicializar em modo `serve`, o servidor gera um token criptográfico efêmero e emite no log:
+>   `[AUTH] Token de sessão gerado: <TOKEN_HEX>`
+> - O agente deve ler este token da saída padrão do processo e utilizá-lo em todas as requisições:
+>   - **Cabeçalho HTTP:** `X-Gemini-Token: <TOKEN_HEX>` ou `Authorization: Bearer <TOKEN_HEX>`
+>   - **WebSocket:** `ws://127.0.0.1:8399/api/stream?token=<TOKEN_HEX>`
+> - Endpoints públicos (não exigem token): `GET /` e `GET /api/health` (ideais para healthcheck de prontidão).
+
+### 4. Orquestração Programática de Sessões ACP
+Para interagir com o GeminiDesktop via API:
+1. **Criar Sessão com Workspace Específico:**
+   ```bash
+   curl -X POST http://127.0.0.1:8399/api/conversations \
+     -H "X-Gemini-Token: $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"cwd": "/caminho/do/projeto"}'
+   ```
+2. **Enviar Prompt ao Agente:**
+   ```bash
+   curl -X POST http://127.0.0.1:8399/api/conversations/$CONV_ID/prompt \
+     -H "X-Gemini-Token: $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"text": "Escreva um teste unitário para auth.go"}'
+   ```
+3. **Consumir Eventos em Tempo Real:** Conecte um cliente WebSocket em `ws://127.0.0.1:8399/api/stream?token=$TOKEN` para receber chunks de resposta, pensamentos (*thinking*), notificações de planos e chamadas de ferramentas (*tool calls*).
+4. **Responder a Pedidos de Permissão:** Caso uma tool call exija confirmação (`permission`), envie:
+   ```bash
+   curl -X POST http://127.0.0.1:8399/api/permission \
+     -H "X-Gemini-Token: $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"id": "$TOOL_CALL_ID", "decision": "allow"}'
+   ```
+
+### 5. Configuração Persistente (`~/.geminidesktop/config.json`)
+Agentes podem pré-configurar o ambiente antes de subir o aplicativo gravando em `~/.geminidesktop/config.json`:
+```json
+{
+  "agent": {
+    "command": "agy",
+    "args": ["acp"]
+  },
+  "defaultCwd": "/caminho/do/projeto",
+  "browserBridgeInProcess": true,
+  "browserBridgePort": 9223,
+  "port": 8399,
+  "turnTimeoutSec": 900
+}
+```
+
+### 6. Localização dos Dados e Limpeza
+- **Banco SQLite:** `~/.geminidesktop/geminidesktop.db` (WAL mode habilitado).
+- **Screenshots e Evidências:** `~/.geminidesktop/screenshots/<conversationId>/`.
+- **Anexos Enviados:** `~/.geminidesktop/attachments/`.
+- **Encerramento Limpo:** Envie `SIGTERM` ao PID do processo para garantir que as transações SQLite e o processo filho do ACP sejam fechados graciosamente.
+
+---
+
 ## Agentes Suportados
 
 O GeminiDesktop-Go suporta múltiplos agentes ACP com autodetecção inteligente de comandos e argumentos:
@@ -127,7 +261,9 @@ Para usar o Gemini CLI oficial:
      | `POST` | `/api/conversations/{id}/regenerate` | Descarta o último turno e reenvia o último prompt (`text` opcional para edição) |
      | `POST` | `/api/attachments` | Salva anexo enviado em base64 (print colado/drag & drop) e retorna o caminho |
      | `POST` | `/api/export/pdf` | Exporta uma resposta markdown como PDF em `~/Downloads/Gemini Desktop/` |
-     | `POST` | `/api/open-url` | Abre URL http/https **ou caminho de arquivo** no app padrão do sistema |
+     | `POST` | `/api/open-url` | Abre URL externa exclusivamente http/https no navegador padrão |
+     | `POST` | `/api/artifacts/open` | Abre arquivo de artefato ou anexo no app padrão (com validação estrita de allowlist e symlinks) |
+     | `POST` | `/api/files/content` | Retorna o conteúdo de arquivo permitido dentro da allowlist do workspace |
      | `GET` | `/api/conversations/{id}/artifacts` | Lista arquivos criados/modificados no workspace desde a criação da conversa |
      | `POST` | `/api/conversations/{id}/resume` | Retoma sessão anterior via `session/load` do ACP |
      | `GET` | `/api/models` | Lista modelos disponíveis anunciados pelo agente ACP |
