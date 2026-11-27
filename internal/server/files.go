@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -81,6 +82,22 @@ func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "caminho inválido ou não absoluto", http.StatusBadRequest)
 		return
 	}
+
+	// G2 / R1 / R2: Validação estrita de diretórios autorizados e resolução de symlinks
+	cleanPath, err := s.ValidateArtifactPath(path)
+	if err != nil {
+		if errors.Is(err, ErrPathIsDir) {
+			http.Error(w, "caminho é um diretório", http.StatusBadRequest)
+			return
+		}
+		if os.IsNotExist(err) {
+			http.Error(w, "arquivo não encontrado", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "acesso não autorizado: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	path = cleanPath
 
 	fi, err := os.Stat(path)
 	if err != nil {

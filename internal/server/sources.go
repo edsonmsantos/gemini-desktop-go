@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 )
@@ -30,6 +33,37 @@ var sourcesHTTPClient = &http.Client{
 		}
 		return nil
 	},
+	Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+			if err != nil {
+				return nil, err
+			}
+			for _, ip := range ips {
+				if os.Getenv("GMD_ALLOW_PRIVATE_SOURCES") != "1" && isPrivateOrLoopbackIP(ip) {
+					return nil, fmt.Errorf("acesso bloqueado a IP privado/loopback: %s", ip.String())
+				}
+			}
+			dialer := &net.Dialer{Timeout: 3 * time.Second}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+		},
+	},
+}
+
+func isPrivateOrLoopbackIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 169 && ip4[1] == 254 {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveSingleURL resolve a URL final seguindo redirects

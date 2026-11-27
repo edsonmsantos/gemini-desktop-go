@@ -30,6 +30,32 @@ type Config struct {
 	BrowserBridgeTokenPath     string      `json:"browserBridgeTokenPath,omitempty"`
 	BrowserBridgeInProcess     *bool       `json:"browserBridgeInProcess,omitempty"`
 	BrowserBridgeUpdateBaseURL string      `json:"browserBridgeUpdateBaseURL,omitempty"`
+	ScreenshotsBaseDir         string      `json:"screenshotsBaseDir,omitempty"`
+	UserSkillsDir              string      `json:"userSkillsDir,omitempty"`
+}
+
+// GetScreenshotsBaseDir retorna o diretório base configurado para screenshots
+func (c *Config) GetScreenshotsBaseDir() string {
+	if c != nil && c.ScreenshotsBaseDir != "" {
+		return c.ScreenshotsBaseDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".geminidesktop", "screenshots")
+}
+
+// GetUserSkillsDir retorna o diretório de skills globais do usuário
+func (c *Config) GetUserSkillsDir() string {
+	if c != nil && c.UserSkillsDir != "" {
+		return c.UserSkillsDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".agents", "skills")
 }
 
 // BridgeInProcess retorna se o daemon do browser-bridge deve rodar em-processo (padrão true)
@@ -123,6 +149,12 @@ func APIBaseURL(port int) string {
 func FormatInjectJS(port int) string {
 	baseURL := APIBaseURL(port)
 	return fmt.Sprintf("window.__GMD_API__ = %q; window.__GEMINI_DESKTOP_CONFIG__ = { port: %d, baseUrl: %q };", baseURL, port, baseURL)
+}
+
+// FormatInjectJSWithToken gera o script JavaScript injetado no Webview Wails com a porta e o token de sessão
+func FormatInjectJSWithToken(port int, token string) string {
+	baseURL := APIBaseURL(port)
+	return fmt.Sprintf("window.__GMD_API__ = %q; window.__GEMINI_TOKEN__ = %q; window.__GEMINI_DESKTOP_CONFIG__ = { port: %d, baseUrl: %q };", baseURL, token, port, baseURL)
 }
 
 func ConfigFilePath() (string, error) {

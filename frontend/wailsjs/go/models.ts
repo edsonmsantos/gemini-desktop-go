@@ -4,6 +4,7 @@ export namespace main {
 	    port: number;
 	    baseUrl: string;
 	    agent: string;
+	    token: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppConfigResponse(source);
@@ -14,6 +15,7 @@ export namespace main {
 	        this.port = source["port"];
 	        this.baseUrl = source["baseUrl"];
 	        this.agent = source["agent"];
+	        this.token = source["token"];
 	    }
 	}
 

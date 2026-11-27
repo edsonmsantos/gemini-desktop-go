@@ -1,19 +1,18 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-pdf/fpdf"
+	"github.com/pkg/browser"
 )
 
 // ===== Exportação de resposta como PDF =====
@@ -293,7 +292,7 @@ func (s *Server) handleExportPDF(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"path": dest, "displayPath": display})
 }
 
-// POST /api/open-url — abre uma URL no navegador padrão do sistema
+// POST /api/open-url — abre uma URL http/https no navegador padrão do sistema
 func (s *Server) handleOpenURL(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
@@ -304,33 +303,14 @@ func (s *Server) handleOpenURL(w http.ResponseWriter, r *http.Request) {
 	}
 	trimmed := strings.TrimSpace(req.URL)
 
-	// Caminho absoluto de arquivo: abre com o app padrão do sistema
-	if strings.HasPrefix(trimmed, "/") {
-		if st, err := os.Stat(trimmed); err != nil || st.IsDir() {
-			http.Error(w, "arquivo não encontrado", http.StatusNotFound)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		if err := exec.CommandContext(ctx, "xdg-open", trimmed).Start(); err != nil {
-			http.Error(w, "falha ao abrir arquivo: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-		return
-	}
-
-	// URL http/https: navegador padrão
+	// URL http/https: abre no navegador padrão via browser.OpenURL (sem execução de caminhos locais)
 	u, err := url.Parse(trimmed)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		http.Error(w, "URL inválida (apenas http/https)", http.StatusBadRequest)
+		http.Error(w, "URL inválida (apenas links http/https são permitidos)", http.StatusBadRequest)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	if err := exec.CommandContext(ctx, "xdg-open", u.String()).Start(); err != nil {
+	if err := browser.OpenURL(u.String()); err != nil {
 		http.Error(w, "falha ao abrir no navegador: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

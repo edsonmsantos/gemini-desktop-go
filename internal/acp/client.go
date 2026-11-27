@@ -128,6 +128,7 @@ type Client struct {
 
 	activePromptCh chan<- Event
 	sessionChans   map[string]chan<- Event
+	sessionQueues  map[string]*sessionQueue
 	errorEmitted   map[string]bool
 	promptMu       sync.Mutex
 
@@ -276,6 +277,8 @@ func (c *Client) startProcessLocked() error {
 		}
 	}
 
+	attachProcessToJob(cmd.Process)
+
 	framer := NewFramer(stdoutPipe, stdinPipe)
 	framer.SetNotificationHandler(c.handleIncomingMessage)
 	framer.Start()
@@ -340,11 +343,12 @@ func (c *Client) handleProcessExit(cmd *exec.Cmd) {
 // NewClient instancia o cliente e inicia o processo filho com pipes stdin/stdout e log em stderr
 func NewClient(cfg ClientConfig) (*Client, error) {
 	c := &Client{
-		cfg:          cfg,
-		sessionChans: make(map[string]chan<- Event),
-		errorEmitted: make(map[string]bool),
-		pendingPerms: make(map[string]pendingPermission),
-		sessionCaps:  make(map[string]SessionCaps),
+		cfg:           cfg,
+		sessionChans:  make(map[string]chan<- Event),
+		sessionQueues: make(map[string]*sessionQueue),
+		errorEmitted:  make(map[string]bool),
+		pendingPerms:  make(map[string]pendingPermission),
+		sessionCaps:   make(map[string]SessionCaps),
 	}
 
 	c.mu.Lock()
@@ -774,6 +778,66 @@ func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 	}
 }
 
+type sessionQueue struct {
+	sessionID string
+	destCh    chan<- Event
+	mu        sync.Mutex
+	cond      *sync.Cond
+	events    []Event
+	closed    bool
+	done      chan struct{}
+}
+
+func newSessionQueue(sessionID string, destCh chan<- Event) *sessionQueue {
+	q := &sessionQueue{
+		sessionID: sessionID,
+		destCh:    destCh,
+		done:      make(chan struct{}),
+	}
+	q.cond = sync.NewCond(&q.mu)
+	return q
+}
+
+func (q *sessionQueue) push(ev Event) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return
+	}
+	q.events = append(q.events, ev)
+	if len(q.events) > 10000 && len(q.events)%2000 == 1 {
+		log.Printf("[aviso] high-water-mark: fila de eventos da sessão %s acumulou %d eventos", q.sessionID, len(q.events))
+	}
+	q.cond.Signal()
+}
+
+func (q *sessionQueue) run() {
+	defer close(q.done)
+	for {
+		q.mu.Lock()
+		for len(q.events) == 0 && !q.closed {
+			q.cond.Wait()
+		}
+		if len(q.events) == 0 && q.closed {
+			q.mu.Unlock()
+			return
+		}
+		ev := q.events[0]
+		q.events = q.events[1:]
+		q.mu.Unlock()
+
+		q.destCh <- ev
+	}
+}
+
+func (q *sessionQueue) closeAndWait() {
+	q.mu.Lock()
+	q.closed = true
+	q.cond.Broadcast()
+	q.mu.Unlock()
+	<-q.done
+}
+
 func (c *Client) emitEvent(ev Event) {
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
@@ -785,6 +849,15 @@ func (c *Client) emitEvent(ev Event) {
 		c.errorEmitted[ev.SessionID] = true
 	}
 
+	// 1. Roteamento assíncrono para a fila dedicada da sessão (zero blocking no readLoop)
+	if ev.SessionID != "" && c.sessionQueues != nil {
+		if q, ok := c.sessionQueues[ev.SessionID]; ok {
+			q.push(ev)
+			return
+		}
+	}
+
+	// 2. Fallback para canais diretos (testes unitários com mock ou activePromptCh)
 	var ch chan<- Event
 	if ev.SessionID != "" {
 		ch = c.sessionChans[ev.SessionID]
@@ -794,14 +867,14 @@ func (c *Client) emitEvent(ev Event) {
 	}
 
 	if ch != nil {
-		// Envia com backoff limitado: descartar chunks corromperia a resposta
-		// persistida no SQLite. O consumidor é a goroutine do turno, que está
-		// sempre drenando enquanto o framer lê — 5s é folga segura contra
-		// travamento permanente.
 		select {
 		case ch <- ev:
-		case <-time.After(5 * time.Second):
-			log.Printf("[aviso] evento %s descartado: consumidor da sessão não drenou em 5s", ev.Type)
+		default:
+			select {
+			case ch <- ev:
+			case <-time.After(50 * time.Millisecond):
+				log.Printf("[aviso] evento %s descartado: canal direto não drenou a tempo", ev.Type)
+			}
 		}
 	}
 }
@@ -1238,16 +1311,26 @@ func (c *Client) PromptSession(ctx context.Context, sessionID, text string, even
 
 // PromptSessionWithContent envia múltiplos blocos de conteúdo para uma sessão específica e roteia seus eventos para o eventCh
 func (c *Client) PromptSessionWithContent(ctx context.Context, sessionID string, content []interface{}, eventCh chan<- Event) error {
+	queue := newSessionQueue(sessionID, eventCh)
+	go queue.run()
+
 	c.promptMu.Lock()
+	if c.sessionQueues == nil {
+		c.sessionQueues = make(map[string]*sessionQueue)
+	}
+	c.sessionQueues[sessionID] = queue
 	c.sessionChans[sessionID] = eventCh
 	delete(c.errorEmitted, sessionID)
 	c.promptMu.Unlock()
 
 	defer func() {
 		c.promptMu.Lock()
+		delete(c.sessionQueues, sessionID)
 		delete(c.sessionChans, sessionID)
 		delete(c.errorEmitted, sessionID)
 		c.promptMu.Unlock()
+
+		queue.closeAndWait()
 	}()
 
 	params := map[string]interface{}{

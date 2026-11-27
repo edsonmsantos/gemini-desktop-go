@@ -151,10 +151,16 @@ func (s *Server) handleBrowserInstallPolicy(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	expectedURL := s.getEffectiveUpdateBaseURL()
 	updateURL := strings.TrimSpace(req.UpdateURL)
-	if updateURL == "" {
-		updateURL = s.getEffectiveUpdateBaseURL()
+	if updateURL != "" && updateURL != expectedURL {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "UpdateURL não permitido: deve corresponder ao canal local ou oficial configurado",
+		})
+		return
 	}
+	updateURL = expectedURL
 
 	extensionID := crxsign.ExtensionID()
 	content := policymgr.BuildExtensionSettingsJSON(extensionID, updateURL)
@@ -163,7 +169,10 @@ func (s *Server) handleBrowserInstallPolicy(w http.ResponseWriter, r *http.Reque
 	var appliedTargets []string
 	for _, target := range targets {
 		if err := writer.WritePolicy(target, content); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"falha ao aplicar política para %s: %s"}`, target.Browser, err.Error()), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("falha ao aplicar política para %s: %s", target.Browser, err.Error()),
+			})
 			return
 		}
 		loc := target.ConfigPath
@@ -210,7 +219,10 @@ func (s *Server) handleBrowserRemovePolicy(w http.ResponseWriter, r *http.Reques
 	var removedTargets []string
 	for _, target := range targets {
 		if err := writer.RemovePolicy(target); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"falha ao remover política do %s: %s"}`, target.Browser, err.Error()), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("falha ao remover política do %s: %s", target.Browser, err.Error()),
+			})
 			return
 		}
 		loc := target.ConfigPath

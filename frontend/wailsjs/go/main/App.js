@@ -10,6 +10,10 @@ export function GetServerURL() {
   return window['go']['main']['App']['GetServerURL']();
 }
 
+export function OpenArtifact(arg1) {
+  return window['go']['main']['App']['OpenArtifact'](arg1);
+}
+
 export function SavePdfDialog(arg1, arg2) {
   return window['go']['main']['App']['SavePdfDialog'](arg1, arg2);
 }

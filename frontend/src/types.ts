@@ -147,7 +147,7 @@ export interface AgentInfo {
 }
 
 export interface WSEvent {
-  type: 'message_chunk' | 'thought_chunk' | 'tool_call' | 'plan' | 'permission_request' | 'turn_done' | 'error'
+  type: 'message_chunk' | 'thought_chunk' | 'tool_call' | 'plan' | 'permission_request' | 'turn_done' | 'error' | 'browser_approval_requested'
   sessionId?: string
   conversationId?: string
   messageChunk?: { text: string }
@@ -157,6 +157,7 @@ export interface WSEvent {
   permissionRequest?: PermissionRequest
   turnDone?: { stopReason: string }
   error?: { msg: string }
+  browserApproval?: { id: string; tool: string; summary: string; targetUrl: string }
 }
 
 export interface Artifact {

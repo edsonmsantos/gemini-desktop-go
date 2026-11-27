@@ -31,38 +31,40 @@ import (
 	"github.com/edsonmsantos/browser-bridge/policymgr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/pkg/browser"
 )
 
-func isAllowedOrigin(origin string) bool {
+// ErrPathIsDir é retornado por ValidateArtifactPath quando o caminho informado é um diretório
+var ErrPathIsDir = errors.New("o caminho especificado é um diretório")
+
+// GenerateSessionToken gera um token criptográfico efêmero para a sessão atual
+func GenerateSessionToken() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("token-%d", time.Now().UnixNano())
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func (s *Server) isAllowedOrigin(origin string) bool {
 	if origin == "" {
 		return false
 	}
-	if strings.HasPrefix(origin, "wails://") {
+	if strings.HasPrefix(origin, "wails://") || strings.HasPrefix(origin, "https://wails.localhost") || strings.HasPrefix(origin, "http://wails.localhost") {
 		return true
 	}
-	if origin == "http://127.0.0.1" || strings.HasPrefix(origin, "http://127.0.0.1:") {
+	// Permite a porta exata da aplicação em 127.0.0.1
+	expected127 := fmt.Sprintf("http://127.0.0.1:%d", s.port)
+	if origin == expected127 || origin == "http://127.0.0.1" {
 		return true
 	}
-	if origin == "http://localhost" || strings.HasPrefix(origin, "http://localhost:") {
-		return true
-	}
-	if origin == "ws://127.0.0.1" || strings.HasPrefix(origin, "ws://127.0.0.1:") {
-		return true
-	}
-	if origin == "ws://localhost" || strings.HasPrefix(origin, "ws://localhost:") {
-		return true
-	}
-	return false
-}
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
+	// Em modo de desenvolvimento (GMD_DEV=1 ou testes com porta 0), permite localhost (Vite 5173, etc.)
+	if os.Getenv("GMD_DEV") == "1" || s.port == 0 {
+		if origin == "http://localhost" || strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:") {
 			return true
 		}
-		return isAllowedOrigin(origin)
-	},
+	}
+	return false
 }
 
 // Server expõe a API HTTP e WebSocket para o frontend local
@@ -71,6 +73,8 @@ type Server struct {
 	defaultCWD string
 	staticFS   fs.FS
 	store      *store.Store
+
+	sessionToken string
 
 	tempWorkspacesDir  string
 	googleAccountsPath string
@@ -200,6 +204,20 @@ func (s *Server) SetAgentBinary(binary string) {
 // SetPort define a porta do servidor HTTP
 func (s *Server) SetPort(port int) {
 	s.port = port
+}
+
+// SetSessionToken define o token de autorização efêmero da sessão atual
+func (s *Server) SetSessionToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionToken = token
+}
+
+// SessionToken retorna o token de autorização configurado
+func (s *Server) SessionToken() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionToken
 }
 
 // SetTurnTimeout define a duração máxima permitida para um turno (0 = sem limite)
@@ -376,6 +394,39 @@ func (s *Server) ensureActiveSession(ctx context.Context, conv *store.Conversati
 	return newSessID, nil
 }
 
+func (s *Server) checkWebSocketOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	s.mu.Lock()
+	token := s.sessionToken
+	s.mu.Unlock()
+
+	// Se não há Origin (cliente CLI ou conexão local)
+	if origin == "" {
+		if token != "" {
+			tok := r.URL.Query().Get("token")
+			if tok == "" {
+				tok = r.Header.Get("X-Gemini-Token")
+			}
+			return tok == token
+		}
+		return true
+	}
+
+	if !s.isAllowedOrigin(origin) {
+		return false
+	}
+
+	if token != "" {
+		tok := r.URL.Query().Get("token")
+		if tok == "" {
+			tok = r.Header.Get("X-Gemini-Token")
+		}
+		return tok == token
+	}
+
+	return true
+}
+
 // Handler expõe o roteador HTTP com middleware CORS
 func (s *Server) Handler() http.Handler {
 	return s.corsMiddleware(s.mux)
@@ -384,19 +435,48 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		allowed := isAllowedOrigin(origin)
 
-		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api" {
-			if allowed {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
+		if origin != "" {
+			if !s.isAllowedOrigin(origin) {
+				http.Error(w, "Origin not allowed", http.StatusForbidden)
+				return
 			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Gemini-Token, Authorization")
+		}
 
-			if r.Method == http.MethodOptions {
-				if allowed {
-					w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// Proteção contra payload excessivo / DoS por exaustão de memória (40MB cobre anexos base64 de até 25-28MB)
+		if r.Body != nil && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete) {
+			r.Body = http.MaxBytesReader(w, r.Body, 40<<20) // 40MB max
+		}
+
+		// Validação de token de sessão em endpoints protegidos
+		s.mu.Lock()
+		token := s.sessionToken
+		s.mu.Unlock()
+
+		// Endpoints públicos isentos de token: GET / e GET /api/health
+		isPublic := r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/api/health")
+
+		if !isPublic && token != "" {
+			clientToken := r.Header.Get("X-Gemini-Token")
+			if clientToken == "" {
+				authHdr := r.Header.Get("Authorization")
+				if strings.HasPrefix(authHdr, "Bearer ") {
+					clientToken = strings.TrimPrefix(authHdr, "Bearer ")
 				}
-				w.WriteHeader(http.StatusNoContent)
+			}
+			if clientToken == "" && r.URL.Path == "/api/stream" {
+				clientToken = r.URL.Query().Get("token")
+			}
+			if clientToken != token {
+				http.Error(w, "Unauthorized: missing or invalid session token", http.StatusUnauthorized)
 				return
 			}
 		}
@@ -424,6 +504,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/conversations/{id}/artifacts", s.handleArtifacts)
 	s.mux.HandleFunc("POST /api/export/pdf", s.handleExportPDF)
 	s.mux.HandleFunc("POST /api/open-url", s.handleOpenURL)
+	s.mux.HandleFunc("POST /api/artifacts/open", s.handleOpenArtifact)
 	s.mux.HandleFunc("POST /api/files/content", s.handleFileContent)
 	s.mux.HandleFunc("POST /api/sources/resolve", s.handleResolveSources)
 
@@ -464,10 +545,18 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/permission", s.handlePermission)
 	s.mux.HandleFunc("POST /api/cancel", s.handleCancel)
 
-	// Arquivos estáticos da interface web
+	// Arquivos estáticos da interface web ou endpoint de status quando API-only
 	if s.staticFS != nil {
 		fileServer := http.FileServer(http.FS(s.staticFS))
 		s.mux.Handle("/", fileServer)
+	} else {
+		s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"app":    "Gemini Desktop API",
+				"status": "running",
+			})
+		})
 	}
 }
 
@@ -917,6 +1006,29 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 		delete(s.convSessions, id)
 	}
 	s.convMu.Unlock()
+
+	// P0.5: Limpeza segura de screenshots e temp workspace associados à conversa
+	s.mu.Lock()
+	shotsBase := s.screenshotsBaseDir
+	s.mu.Unlock()
+	if shotsBase != "" && id != "" {
+		cleanShotsBase := filepath.Clean(shotsBase)
+		convShotsDir := filepath.Clean(filepath.Join(cleanShotsBase, id))
+		rel, err := filepath.Rel(cleanShotsBase, convShotsDir)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != "." && filepath.Base(convShotsDir) == id {
+			_ = os.RemoveAll(convShotsDir)
+		}
+	}
+
+	if conv != nil && conv.CWD != "" && id != "" {
+		tempBase := filepath.Clean(s.getTempWorkspacesDir())
+		convCwd := filepath.Clean(conv.CWD)
+		rel, err := filepath.Rel(tempBase, convCwd)
+		// Guarda de segurança estrita: só apaga se convCwd estiver estritamente dentro de tempWorkspacesDir E basename == id
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != "." && filepath.Base(convCwd) == id {
+			_ = os.RemoveAll(convCwd)
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -1920,6 +2032,9 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{
+		CheckOrigin: s.checkWebSocketOrigin,
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[ws upgrade error] %v", err)
@@ -1937,11 +2052,189 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 	}()
 
+	conn.SetReadLimit(4096)
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				s.writeMu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
+				s.writeMu.Unlock()
+				if err != nil {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			break
 		}
 	}
+}
+
+// BroadcastApprovalRequested envia notificação imediata via WebSocket para o frontend
+func (s *Server) BroadcastApprovalRequested(id, tool, summary, targetURL string) {
+	s.broadcastJSON(map[string]interface{}{
+		"type": "browser_approval_requested",
+		"browserApproval": map[string]interface{}{
+			"id":        id,
+			"tool":      tool,
+			"summary":   summary,
+			"targetUrl": targetURL,
+		},
+	})
+}
+
+var allowedArtifactExtensions = map[string]bool{
+	".pdf":  true,
+	".png":  true,
+	".jpg":  true,
+	".jpeg": true,
+	".webp": true,
+	".gif":  true,
+	".bmp":  true,
+	".svg":  true,
+	".txt":  true,
+	".md":   true,
+	".json": true,
+	".csv":  true,
+	".html": true,
+}
+
+// ValidateArtifactPath verifica se o arquivo está localizado em diretórios seguros autorizados
+// e retorna o caminho canônico absoluto validado resolvendo symlinks.
+func (s *Server) ValidateArtifactPath(path string) (string, error) {
+	cleanPath := filepath.Clean(strings.TrimSpace(path))
+	if !filepath.IsAbs(cleanPath) {
+		abs, err := filepath.Abs(cleanPath)
+		if err != nil {
+			return "", errors.New("caminho inválido")
+		}
+		cleanPath = abs
+	}
+
+	home, _ := os.UserHomeDir()
+	var allowedDirs []string
+
+	if home != "" {
+		allowedDirs = append(allowedDirs,
+			filepath.Join(home, "Downloads", "Gemini Desktop"),
+			filepath.Join(home, ".geminidesktop", "attachments"),
+			filepath.Join(home, ".geminidesktop", "screenshots"),
+		)
+	}
+
+	s.mu.Lock()
+	if s.screenshotsBaseDir != "" {
+		allowedDirs = append(allowedDirs, filepath.Clean(s.screenshotsBaseDir))
+	}
+	s.mu.Unlock()
+
+	if s.tempWorkspacesDir != "" {
+		allowedDirs = append(allowedDirs, filepath.Clean(s.tempWorkspacesDir))
+	}
+	allowedDirs = append(allowedDirs, filepath.Clean(s.getTempWorkspacesDir()))
+
+	// 1. Validação sintática: o caminho fornecido deve estar localizado em um diretório permitido
+	var allowedSyntactic bool
+	for _, dir := range allowedDirs {
+		if dir == "" {
+			continue
+		}
+		rel, err := filepath.Rel(dir, cleanPath)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+			allowedSyntactic = true
+			break
+		}
+	}
+	if !allowedSyntactic {
+		return "", errors.New("acesso ao caminho não autorizado (fora dos diretórios de trabalho ou artefatos)")
+	}
+
+	// 2. Resolução estrita de links simbólicos (R1: previne bypass onde symlink aponta para arquivos fora da allowlist)
+	realTarget, err := filepath.EvalSymlinks(cleanPath)
+	if err != nil {
+		return "", err
+	}
+
+	// 3. Re-validação do alvo resolvido contra os diretórios autorizados (também resolvidos por EvalSymlinks)
+	var allowedResolved bool
+	for _, dir := range allowedDirs {
+		if dir == "" {
+			continue
+		}
+		realDir, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			realDir = dir
+		}
+		rel, err := filepath.Rel(realDir, realTarget)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+			allowedResolved = true
+			break
+		}
+	}
+	if !allowedResolved {
+		return "", errors.New("acesso ao caminho não autorizado (link simbólico aponta para fora dos diretórios autorizados)")
+	}
+
+	fi, err := os.Stat(realTarget)
+	if err != nil {
+		return "", err
+	}
+	if fi.IsDir() {
+		return "", ErrPathIsDir
+	}
+
+	return realTarget, nil
+}
+
+func (s *Server) handleOpenArtifact(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Path) == "" {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	cleanPath, err := s.ValidateArtifactPath(req.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "arquivo não encontrado", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	// R2: Bloqueia abertura de formatos executáveis ou launchers (.desktop, .sh, .bin, etc.)
+	ext := strings.ToLower(filepath.Ext(cleanPath))
+	if !allowedArtifactExtensions[ext] {
+		http.Error(w, "tipo de arquivo não permitido para abertura direta", http.StatusBadRequest)
+		return
+	}
+
+	if err := browser.OpenFile(cleanPath); err != nil {
+		http.Error(w, fmt.Sprintf("falha ao abrir arquivo: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // Broadcast envia um frame JSON para todos os clientes conectados ao WebSocket

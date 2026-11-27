@@ -12,7 +12,10 @@ import (
 )
 
 func TestHandleFileContent(t *testing.T) {
-	s := &Server{mux: http.NewServeMux()}
+	s := &Server{
+		mux:               http.NewServeMux(),
+		tempWorkspacesDir: os.TempDir(),
+	}
 	s.setupRoutes()
 	ts := httptest.NewServer(s.mux)
 	defer ts.Close()
@@ -130,9 +133,17 @@ func TestHandleFileContent(t *testing.T) {
 	})
 
 	t.Run("inexistente 404", func(t *testing.T) {
-		resp, _ := postFileContent("/caminho/completamente/inexistente/arquivo.txt")
+		dir := t.TempDir()
+		resp, _ := postFileContent(filepath.Join(dir, "arquivo_inexistente.txt"))
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("esperava 404, obteve %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("arquivo fora da allowlist 403", func(t *testing.T) {
+		resp, _ := postFileContent("/etc/passwd")
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("esperava 403 para arquivo fora da allowlist, obteve %d", resp.StatusCode)
 		}
 	})
 

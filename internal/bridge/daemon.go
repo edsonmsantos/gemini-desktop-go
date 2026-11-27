@@ -14,10 +14,18 @@ import (
 
 const AppVersion = "geminidesktop-go/0.2.0"
 
+// ApprovalCallback define uma função notificada quando uma ação requer aprovação
+type ApprovalCallback func(id, tool, summary, targetURL string)
+
 // StartInProcess inicia o daemon do browser-bridge em processo via eleição de porta.
 // Se cfg.BrowserBridgeInProcess for falso, não faz nada.
 // Se a porta estiver ocupada, o daemon externo assume a primazia e a função retorna stop=nil, err=nil.
 func StartInProcess(cfg *config.Config) (stop func(), err error) {
+	return StartInProcessWithCallback(cfg, nil)
+}
+
+// StartInProcessWithCallback inicia o daemon com callback opcional para push de aprovações pendentes
+func StartInProcessWithCallback(cfg *config.Config, onApproval ApprovalCallback) (stop func(), err error) {
 	if cfg != nil && !cfg.BridgeInProcess() {
 		return nil, nil
 	}
@@ -44,6 +52,13 @@ func StartInProcess(cfg *config.Config) (stop func(), err error) {
 
 	appr := approval.NewManager()
 	appr.NotifyOnStderr = false
+	if onApproval != nil {
+		appr.OnPending = func(item *approval.ApprovalItem) {
+			if item != nil {
+				onApproval(item.ID, item.Tool, item.Summary, item.URL)
+			}
+		}
+	}
 
 	var eb *relay.ElectionBridge
 

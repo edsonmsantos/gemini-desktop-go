@@ -118,24 +118,24 @@ func TestHandleArtifacts_ConvSemCwd(t *testing.T) {
 	}
 }
 
-// TestOpenURL_AceitaArquivo valida a extensão do /api/open-url para paths
-func TestOpenURL_AceitaArquivo(t *testing.T) {
+// TestOpenURL_RejeitaArquivo valida que /api/open-url rejeita paths locais (P0.3)
+func TestOpenURL_RejeitaArquivo(t *testing.T) {
 	s := &Server{}
 	ts := httptest.NewServer(http.HandlerFunc(s.handleOpenURL))
 	defer ts.Close()
 
-	// arquivo inexistente → 404 (valida o path sem abrir nada)
+	// arquivo inexistente ou caminho local → 400 Bad Request
 	resp, _ := http.Post(ts.URL, "application/json", bytes.NewReader([]byte(`{"url":"/tmp/nao-existe-xyz.pdf"}`)))
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("esperava 404 para arquivo inexistente, obteve %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("esperava 400 para caminho de arquivo local, obteve %d", resp.StatusCode)
 	}
 
-	// diretório → 404 (só arquivos)
+	// diretório → 400 Bad Request
 	dir := t.TempDir()
 	resp2, _ := http.Post(ts.URL, "application/json", bytes.NewReader([]byte(`{"url":"`+dir+`"}`)))
 	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusNotFound {
-		t.Fatalf("esperava 404 para diretório, obteve %d", resp2.StatusCode)
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("esperava 400 para diretório, obteve %d", resp2.StatusCode)
 	}
 }

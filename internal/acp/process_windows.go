@@ -3,13 +3,65 @@
 package acp
 
 import (
+	"log"
 	"os"
 	"os/exec"
+	"sync"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
-// configureProcessGroup no Windows não tem grupo de processos POSIX — no-op
+var (
+	jobHandle windows.Handle
+	jobOnce   sync.Once
+)
+
+func initJobObject() {
+	jobOnce.Do(func() {
+		h, err := windows.CreateJobObject(nil, nil)
+		if err != nil {
+			log.Printf("[acp] falha ao criar Job Object Windows: %v", err)
+			return
+		}
+		info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+			BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+				LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+			},
+		}
+		_, err = windows.SetInformationJobObject(
+			h,
+			windows.JobObjectExtendedLimitInformation,
+			uintptr(unsafe.Pointer(&info)),
+			uint32(unsafe.Sizeof(info)),
+		)
+		if err != nil {
+			log.Printf("[acp] falha ao configurar KILL_ON_JOB_CLOSE no Job Object: %v", err)
+			_ = windows.CloseHandle(h)
+			return
+		}
+		jobHandle = h
+	})
+}
+
+// configureProcessGroup no Windows não tem grupo de processos POSIX — no-op pré-start
 func configureProcessGroup(cmd *exec.Cmd) {
-	// no-op: Windows gerencia a árvore de processos via Job Objects (não usado aqui)
+	// Job Object é atribuído após cmd.Start() via attachProcessToJob
+}
+
+// attachProcessToJob associa o processo filho ao Job Object com KILL_ON_JOB_CLOSE
+func attachProcessToJob(proc *os.Process) {
+	if proc == nil {
+		return
+	}
+	initJobObject()
+	if jobHandle != 0 {
+		hProc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(proc.Pid))
+		if err == nil {
+			_ = windows.AssignProcessToJobObject(jobHandle, hProc)
+			_ = windows.CloseHandle(hProc)
+		}
+	}
 }
 
 // signalProcessTerm no Windows termina o processo (Signal só suporta Kill)

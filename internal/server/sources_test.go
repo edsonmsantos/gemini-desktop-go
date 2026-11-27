@@ -10,6 +10,7 @@ import (
 )
 
 func TestSourcesResolve(t *testing.T) {
+	t.Setenv("GMD_ALLOW_PRIVATE_SOURCES", "1")
 	// 1. Servidor de destino e redirecionamento
 	var targetHits int32
 	destMux := http.NewServeMux()
@@ -121,5 +122,38 @@ func TestSourcesResolve(t *testing.T) {
 	newHits := atomic.LoadInt32(&targetHits)
 	if newHits != initialHits {
 		t.Errorf("cache falhou: targetHits mudou de %d para %d", initialHits, newHits)
+	}
+}
+
+func TestSourcesResolve_SSRFBlocked(t *testing.T) {
+	// Garante que GMD_ALLOW_PRIVATE_SOURCES não está ativo
+	t.Setenv("GMD_ALLOW_PRIVATE_SOURCES", "")
+
+	srv := &Server{mux: http.NewServeMux()}
+	srv.setupRoutes()
+	apiServer := httptest.NewServer(srv.Handler())
+	defer apiServer.Close()
+
+	body, _ := json.Marshal(map[string][]string{
+		"urls": {"http://127.0.0.1:8080/secret", "http://192.168.1.1/admin"},
+	})
+	resp, err := apiServer.Client().Post(apiServer.URL+"/api/sources/resolve", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/sources/resolve falhou: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Resolved []SourceResolution `json:"resolved"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("falha ao decodificar resposta: %v", err)
+	}
+
+	for _, item := range result.Resolved {
+		// IPs privados/loopback devem ter status 0 (conexão bloqueada)
+		if item.Status != 0 {
+			t.Errorf("esperava status 0 (bloqueado por SSRF) para %s, obteve %d", item.From, item.Status)
+		}
 	}
 }

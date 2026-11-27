@@ -14,6 +14,7 @@ declare global {
       OnFileDropOff?: () => void
     }
     __GMD_API__?: string
+    __GEMINI_TOKEN__?: string
     __GEMINI_DESKTOP_CONFIG__?: {
       port?: number
       baseUrl?: string
@@ -22,14 +23,51 @@ declare global {
       main?: {
         App?: {
           GetServerURL?: () => Promise<string>
-          GetConfig?: () => Promise<{ port: number; baseUrl: string; agent: string }>
+          GetConfig?: () => Promise<{ port: number; baseUrl: string; agent: string; token?: string }>
           SelectDirectory?: () => Promise<string>
           SelectFiles?: () => Promise<string[]>
           SavePdfDialog?: (title: string, markdown: string) => Promise<string>
+          OpenArtifact?: (path: string) => Promise<string>
         }
       }
     }
   }
+}
+
+let tokenPromise: Promise<string | undefined> | null = null
+
+export async function ensureSessionToken(): Promise<string | undefined> {
+  if (typeof window === 'undefined') return undefined
+  if (window.__GEMINI_TOKEN__) return window.__GEMINI_TOKEN__
+  if (window.go?.main?.App?.GetConfig) {
+    if (!tokenPromise) {
+      tokenPromise = window.go.main.App.GetConfig()
+        .then((cfg: any) => {
+          if (cfg?.token) {
+            window.__GEMINI_TOKEN__ = cfg.token
+          }
+          return window.__GEMINI_TOKEN__
+        })
+        .catch(() => undefined)
+    }
+    return tokenPromise
+  }
+  return undefined
+}
+
+export async function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  let token = typeof window !== 'undefined' ? window.__GEMINI_TOKEN__ : undefined
+  if (!token) {
+    token = await ensureSessionToken()
+  }
+  if (!token) {
+    return fetch(input, init)
+  }
+  const headers = new Headers(init?.headers || {})
+  if (!headers.has('X-Gemini-Token')) {
+    headers.set('X-Gemini-Token', token)
+  }
+  return fetch(input, { ...init, headers })
 }
 
 export function getBaseURL(): string {
@@ -47,11 +85,13 @@ export function getBaseURL(): string {
 
 export function getWSURL(): string {
   const base = getBaseURL()
-  return base.replace(/^http/, 'ws') + '/api/stream'
+  const token = typeof window !== 'undefined' ? window.__GEMINI_TOKEN__ : undefined
+  const url = base.replace(/^http/, 'ws') + '/api/stream'
+  return token ? `${url}?token=${encodeURIComponent(token)}` : url
 }
 
 export async function fetchAgentInfo(): Promise<AgentInfo> {
-  const res = await fetch(`${getBaseURL()}/api/agent-info`)
+  const res = await authFetch(`${getBaseURL()}/api/agent-info`)
   if (!res.ok) {
     return { email: null }
   }
@@ -60,7 +100,7 @@ export async function fetchAgentInfo(): Promise<AgentInfo> {
 
 export async function fetchModels(): Promise<Model[]> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/models`)
+    const res = await authFetch(`${getBaseURL()}/api/models`)
     if (!res.ok) return []
     return (await res.json()) ?? []
   } catch {
@@ -70,7 +110,7 @@ export async function fetchModels(): Promise<Model[]> {
 
 export async function fetchWorkspaces(): Promise<Workspace[]> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/workspaces`)
+    const res = await authFetch(`${getBaseURL()}/api/workspaces`)
     if (!res.ok) return []
     return (await res.json()) ?? []
   } catch {
@@ -79,7 +119,7 @@ export async function fetchWorkspaces(): Promise<Workspace[]> {
 }
 
 export async function fetchConversations(): Promise<Conversation[]> {
-  const res = await fetch(`${getBaseURL()}/api/conversations`)
+  const res = await authFetch(`${getBaseURL()}/api/conversations`)
   if (!res.ok) {
     throw new Error('Falha ao listar conversas')
   }
@@ -87,7 +127,7 @@ export async function fetchConversations(): Promise<Conversation[]> {
 }
 
 export async function fetchConversation(id: string): Promise<{ conversation: Conversation; messages: Message[] }> {
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}`)
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}`)
   if (!res.ok) {
     throw new Error('Falha ao carregar conversa')
   }
@@ -108,7 +148,7 @@ export async function createConversation(cwd?: string, modelId?: string, modeId?
   if (modelId) payload.modelId = modelId
   if (modeId) payload.modeId = modeId
 
-  const res = await fetch(`${getBaseURL()}/api/conversations`, {
+  const res = await authFetch(`${getBaseURL()}/api/conversations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -121,7 +161,7 @@ export async function createConversation(cwd?: string, modelId?: string, modeId?
 }
 
 export async function fetchCapabilities(conversationId: string): Promise<CapabilitiesResponse> {
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(conversationId)}/capabilities`)
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(conversationId)}/capabilities`)
   if (!res.ok) {
     return { modes: null, tier: null, configOptions: [] }
   }
@@ -129,7 +169,7 @@ export async function fetchCapabilities(conversationId: string): Promise<Capabil
 }
 
 export async function setConversationMode(conversationId: string, modeId: string): Promise<{ status: string; modeId: string }> {
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(conversationId)}/mode`, {
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(conversationId)}/mode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modeId })
@@ -142,7 +182,7 @@ export async function setConversationMode(conversationId: string, modeId: string
 }
 
 export async function patchConversation(id: string, updates: { title?: string; modelId?: string }): Promise<void> {
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}`, {
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates)
@@ -153,7 +193,7 @@ export async function patchConversation(id: string, updates: { title?: string; m
 }
 
 export async function deleteConversation(id: string): Promise<void> {
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}`, {
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}`, {
     method: 'DELETE'
   })
   if (!res.ok) {
@@ -167,7 +207,7 @@ export async function sendPrompt(conversationId: string, text: string, files?: s
     payload.files = files
   }
 
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(conversationId)}/prompt`, {
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(conversationId)}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -217,7 +257,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 export async function uploadAttachment(file: File): Promise<string | null> {
   try {
     const dataBase64 = arrayBufferToBase64(await file.arrayBuffer())
-    const res = await fetch(`${getBaseURL()}/api/attachments`, {
+    const res = await authFetch(`${getBaseURL()}/api/attachments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: file.name, dataBase64 })
@@ -233,7 +273,7 @@ export async function uploadAttachment(file: File): Promise<string | null> {
 // fetchArtifacts lista os arquivos criados/modificados no workspace da conversa
 export async function fetchArtifacts(convId: string): Promise<Artifact[]> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(convId)}/artifacts`)
+    const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(convId)}/artifacts`)
     if (!res.ok) return []
     const data = await res.json()
     return data.artifacts ?? []
@@ -246,7 +286,7 @@ export async function fetchArtifacts(convId: string): Promise<Artifact[]> {
 // ~/Downloads/Gemini Desktop e devolve o caminho de exibição (~).
 export async function exportResponsePdf(title: string, markdown: string): Promise<{ displayPath: string } | null> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/export/pdf`, {
+    const res = await authFetch(`${getBaseURL()}/api/export/pdf`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, markdown })
@@ -260,11 +300,24 @@ export async function exportResponsePdf(title: string, markdown: string): Promis
 }
 
 // openExternalURL abre uma URL http/https no navegador padrão do sistema
+// ou se for um caminho local de arquivo (artefato, screenshot, anexo), abre via App.OpenArtifact ou API segura
 export async function openExternalURL(url: string): Promise<boolean> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/open-url`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      if (window.go?.main?.App?.OpenArtifact) {
+        const err = await window.go.main.App.OpenArtifact(url)
+        return !err
+      }
+      const res = await authFetch(`${getBaseURL()}/api/artifacts/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: url })
+      })
+      return res.ok
+    }
+    const res = await authFetch(`${getBaseURL()}/api/open-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url })
     })
     return res.ok
@@ -278,7 +331,7 @@ export async function openExternalURL(url: string): Promise<boolean> {
 // ou null se não houver imagem.
 export async function pasteClipboardImage(): Promise<string | null> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/clipboard/image`)
+    const res = await authFetch(`${getBaseURL()}/api/clipboard/image`)
     if (!res.ok) return null
     const data = await res.json()
     return data.hasImage ? data.path || null : null
@@ -290,7 +343,7 @@ export async function pasteClipboardImage(): Promise<string | null> {
 // regenerateConversation descarta o último turno e reenvia o último prompt
 // do usuário (com text opcional para a edição de mensagem).
 export async function regenerateConversation(id: string, text?: string): Promise<{ status: string }> {
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}/regenerate`, {
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}/regenerate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(text !== undefined ? { text } : {})
@@ -303,7 +356,7 @@ export async function regenerateConversation(id: string, text?: string): Promise
 }
 
 export async function resumeConversation(id: string): Promise<{ sessionId: string }> {
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}/resume`, {
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}/resume`, {
     method: 'POST'
   })
   if (!res.ok) {
@@ -313,7 +366,7 @@ export async function resumeConversation(id: string): Promise<{ sessionId: strin
 }
 
 export async function respondPermission(callId: string, allow: boolean): Promise<void> {
-  const res = await fetch(`${getBaseURL()}/api/permission`, {
+  const res = await authFetch(`${getBaseURL()}/api/permission`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ callId, allow })
@@ -324,7 +377,7 @@ export async function respondPermission(callId: string, allow: boolean): Promise
 }
 
 export async function cancelTurn(sessionId?: string): Promise<void> {
-  const res = await fetch(`${getBaseURL()}/api/cancel`, {
+  const res = await authFetch(`${getBaseURL()}/api/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId: sessionId || '' })
@@ -422,7 +475,7 @@ export async function fetchSkills(cwd?: string, bypassCache = false): Promise<Sk
     return cached.data
   }
   const url = cwd ? `${getBaseURL()}/api/skills?cwd=${encodeURIComponent(cwd)}` : `${getBaseURL()}/api/skills`
-  const res = await fetch(url)
+  const res = await authFetch(url)
   if (!res.ok) {
     throw new Error('Falha ao carregar skills')
   }
@@ -433,7 +486,7 @@ export async function fetchSkills(cwd?: string, bypassCache = false): Promise<Sk
 }
 
 export async function fetchMCPServers(): Promise<MCPResponse> {
-  const res = await fetch(`${getBaseURL()}/api/mcp`)
+  const res = await authFetch(`${getBaseURL()}/api/mcp`)
   if (res.status === 503) {
     return { servers: [], available: false }
   }
@@ -445,7 +498,7 @@ export async function fetchMCPServers(): Promise<MCPResponse> {
 }
 
 export async function toggleMCPServer(name: string, enable: boolean): Promise<{ name: string; status: string; server?: MCPServer }> {
-  const res = await fetch(`${getBaseURL()}/api/mcp/${encodeURIComponent(name)}/toggle`, {
+  const res = await authFetch(`${getBaseURL()}/api/mcp/${encodeURIComponent(name)}/toggle`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enable })
@@ -460,7 +513,7 @@ export async function toggleMCPServer(name: string, enable: boolean): Promise<{ 
 export async function searchConversations(query: string): Promise<SearchResult[]> {
   const trimmed = query.trim()
   if (!trimmed) return []
-  const res = await fetch(`${getBaseURL()}/api/search?q=${encodeURIComponent(trimmed)}`)
+  const res = await authFetch(`${getBaseURL()}/api/search?q=${encodeURIComponent(trimmed)}`)
   if (!res.ok) {
     throw new Error('Falha ao pesquisar conversas')
   }
@@ -469,7 +522,7 @@ export async function searchConversations(query: string): Promise<SearchResult[]
 }
 
 export async function fetchDiagnostics(): Promise<DiagnosticsInfo> {
-  const res = await fetch(`${getBaseURL()}/api/diagnostics`)
+  const res = await authFetch(`${getBaseURL()}/api/diagnostics`)
   if (!res.ok) {
     throw new Error('Falha ao obter diagnósticos')
   }
@@ -478,7 +531,7 @@ export async function fetchDiagnostics(): Promise<DiagnosticsInfo> {
 
 export async function fetchOnboardingStatus(): Promise<boolean> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/onboarding/status`)
+    const res = await authFetch(`${getBaseURL()}/api/onboarding/status`)
     if (!res.ok) return true // fallback seguro para não travar o app
     const data = await res.json()
     return Boolean(data.done)
@@ -489,7 +542,7 @@ export async function fetchOnboardingStatus(): Promise<boolean> {
 
 export async function markOnboardingDone(): Promise<boolean> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/onboarding/done`, {
+    const res = await authFetch(`${getBaseURL()}/api/onboarding/done`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
@@ -504,7 +557,7 @@ export async function markOnboardingDone(): Promise<boolean> {
 
 export async function fetchFileContent(path: string): Promise<FileContent | null> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/files/content`, {
+    const res = await authFetch(`${getBaseURL()}/api/files/content`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path })
@@ -520,7 +573,7 @@ export async function fetchFileContent(path: string): Promise<FileContent | null
 
 export async function resolveSources(urls: string[]): Promise<SourceResolution[]> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/sources/resolve`, {
+    const res = await authFetch(`${getBaseURL()}/api/sources/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ urls })
@@ -535,7 +588,7 @@ export async function resolveSources(urls: string[]): Promise<SourceResolution[]
 
 export async function fetchSavedPrompts(): Promise<SavedPrompt[]> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/prompts`)
+    const res = await authFetch(`${getBaseURL()}/api/prompts`)
     if (!res.ok) return []
     const data = await res.json()
     return data ?? []
@@ -546,7 +599,7 @@ export async function fetchSavedPrompts(): Promise<SavedPrompt[]> {
 
 export async function createSavedPrompt(title: string, content: string): Promise<SavedPrompt | null> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/prompts`, {
+    const res = await authFetch(`${getBaseURL()}/api/prompts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, content })
@@ -563,7 +616,7 @@ export async function updateSavedPrompt(
   data: { title?: string; content?: string }
 ): Promise<SavedPrompt | null> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/prompts/${id}`, {
+    const res = await authFetch(`${getBaseURL()}/api/prompts/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -577,7 +630,7 @@ export async function updateSavedPrompt(
 
 export async function deleteSavedPrompt(id: string): Promise<boolean> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/prompts/${id}`, {
+    const res = await authFetch(`${getBaseURL()}/api/prompts/${id}`, {
       method: 'DELETE'
     })
     return res.ok
@@ -588,7 +641,7 @@ export async function deleteSavedPrompt(id: string): Promise<boolean> {
 
 export async function fetchFolders(): Promise<FolderInfo[]> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/folders`)
+    const res = await authFetch(`${getBaseURL()}/api/folders`)
     if (!res.ok) return []
     const data = await res.json()
     return data.folders ?? []
@@ -598,7 +651,7 @@ export async function fetchFolders(): Promise<FolderInfo[]> {
 }
 
 export async function setConversationFolder(id: string, folder: string): Promise<{ id: string; folder: string }> {
-  const res = await fetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}/folder`, {
+  const res = await authFetch(`${getBaseURL()}/api/conversations/${encodeURIComponent(id)}/folder`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ folder })
@@ -611,7 +664,7 @@ export async function setConversationFolder(id: string, folder: string): Promise
 }
 
 export async function deleteFolder(name: string): Promise<{ count: number }> {
-  const res = await fetch(`${getBaseURL()}/api/folders/${encodeURIComponent(name)}`, {
+  const res = await authFetch(`${getBaseURL()}/api/folders/${encodeURIComponent(name)}`, {
     method: 'DELETE'
   })
   if (!res.ok) {
@@ -623,7 +676,7 @@ export async function deleteFolder(name: string): Promise<{ count: number }> {
 
 export async function fetchBrowserStatus(): Promise<BrowserStatus> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/browser/status`)
+    const res = await authFetch(`${getBaseURL()}/api/browser/status`)
     if (!res.ok) {
       return {
         connected: false,
@@ -649,7 +702,7 @@ export async function fetchBrowserStatus(): Promise<BrowserStatus> {
 
 export async function fetchBrowserApprovals(): Promise<BrowserApproval[]> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/browser/approvals`)
+    const res = await authFetch(`${getBaseURL()}/api/browser/approvals`)
     if (!res.ok) {
       return []
     }
@@ -661,7 +714,7 @@ export async function fetchBrowserApprovals(): Promise<BrowserApproval[]> {
 
 export async function resolveBrowserApproval(id: string, approve: boolean): Promise<boolean> {
   try {
-    const res = await fetch(`${getBaseURL()}/api/browser/approvals/${encodeURIComponent(id)}`, {
+    const res = await authFetch(`${getBaseURL()}/api/browser/approvals/${encodeURIComponent(id)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approve })
@@ -673,7 +726,7 @@ export async function resolveBrowserApproval(id: string, approve: boolean): Prom
 }
 
 export async function fetchBrowserWizardState(): Promise<BrowserWizardState> {
-  const res = await fetch(`${getBaseURL()}/api/browser/wizard/state`)
+  const res = await authFetch(`${getBaseURL()}/api/browser/wizard/state`)
   if (!res.ok) {
     throw new Error('Falha ao obter estado do assistente do navegador')
   }
@@ -681,7 +734,7 @@ export async function fetchBrowserWizardState(): Promise<BrowserWizardState> {
 }
 
 export async function installBrowserPolicy(browser: string, updateUrl?: string): Promise<InstallPolicyResponse> {
-  const res = await fetch(`${getBaseURL()}/api/browser/install-policy`, {
+  const res = await authFetch(`${getBaseURL()}/api/browser/install-policy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ browser, updateUrl })
@@ -694,7 +747,7 @@ export async function installBrowserPolicy(browser: string, updateUrl?: string):
 }
 
 export async function removeBrowserPolicy(browser: string): Promise<RemovePolicyResponse> {
-  const res = await fetch(`${getBaseURL()}/api/browser/remove-policy`, {
+  const res = await authFetch(`${getBaseURL()}/api/browser/remove-policy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ browser })

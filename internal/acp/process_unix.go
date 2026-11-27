@@ -13,6 +13,10 @@ func configureProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+// attachProcessToJob no Unix é no-op pois os process groups tratam o encerramento em árvore
+func attachProcessToJob(proc *os.Process) {
+}
+
 // signalProcessTerm envia SIGTERM ao processo
 func signalProcessTerm(proc *os.Process) error {
 	return proc.Signal(syscall.SIGTERM)

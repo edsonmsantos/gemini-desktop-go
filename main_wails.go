@@ -18,8 +18,8 @@ import (
 	"geminidesktop-go/internal/config"
 	"geminidesktop-go/internal/server"
 	"geminidesktop-go/internal/store"
-	"geminidesktop-go/web"
 
+	"github.com/pkg/browser"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -38,18 +38,20 @@ type AppConfigResponse struct {
 	Port    int    `json:"port"`
 	BaseURL string `json:"baseUrl"`
 	Agent   string `json:"agent"`
+	Token   string `json:"token"`
 }
 
 // App encapsula o estado para o runtime do Wails
 type App struct {
-	ctx        context.Context
-	client     *acp.Client
-	store      *store.Store
-	server     *server.Server
-	httpServer *http.Server
-	port       int
-	cfg        *config.Config
-	bridgeStop func()
+	ctx          context.Context
+	client       *acp.Client
+	store        *store.Store
+	server       *server.Server
+	httpServer   *http.Server
+	port         int
+	sessionToken string
+	cfg          *config.Config
+	bridgeStop   func()
 }
 
 // NewApp cria uma nova instância de App Wails
@@ -72,6 +74,7 @@ func (a *App) GetConfig() AppConfigResponse {
 		Port:    a.port,
 		BaseURL: fmt.Sprintf("http://127.0.0.1:%d", a.port),
 		Agent:   agentCmd,
+		Token:   a.sessionToken,
 	}
 }
 
@@ -143,6 +146,22 @@ func (a *App) SavePdfDialog(title, markdown string) string {
 	return path
 }
 
+// OpenArtifact abre com segurança um arquivo local de artefato, anexo ou screenshot
+// validado pelo servidor (rejeita qualquer caminho fora das pastas autorizadas).
+func (a *App) OpenArtifact(path string) string {
+	if a.server == nil {
+		return "servidor indisponível"
+	}
+	cleanPath, err := a.server.ValidateArtifactPath(path)
+	if err != nil {
+		return err.Error()
+	}
+	if err := browser.OpenFile(cleanPath); err != nil {
+		return fmt.Sprintf("falha ao abrir arquivo: %v", err)
+	}
+	return ""
+}
+
 // startup é chamado quando a janela desktop do Wails é inicializada
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
@@ -178,19 +197,31 @@ func (a *App) startup(ctx context.Context) {
 		a.store = st
 	}
 
-	a.server = server.NewServerV2(client, cfg.DefaultCWD, web.Files, st)
+	// Servidor iniciado sem staticFS legado (UI servida pelo AssetServer do Wails)
+	a.server = server.NewServerV2(client, cfg.DefaultCWD, nil, st)
 	a.server.SetTempWorkspacesDir(cfg.GetTempWorkspacesDir())
 	a.server.SetNotificationsEnabled(cfg.NotificationsEnabled())
 	a.server.SetTurnTimeout(cfg.TurnTimeout())
 	a.server.SetAgentBinary(cfg.Agent.Command)
 	a.server.SetPort(a.port)
+	a.server.SetScreenshotsBaseDir(cfg.GetScreenshotsBaseDir())
+	a.server.SetUserSkillsDir(cfg.GetUserSkillsDir())
 	a.server.SetBrowserBridge(cfg.GetBrowserBridgePort(), cfg.GetBrowserBridgeTokenPath())
 	if cfg.BrowserBridgeUpdateBaseURL != "" {
 		a.server.SetBrowserBridgeUpdateBaseURL(cfg.BrowserBridgeUpdateBaseURL)
 	}
 
+	// Gera token efêmero de autorização para a sessão da aplicação
+	sessionToken := server.GenerateSessionToken()
+	a.sessionToken = sessionToken
+	a.server.SetSessionToken(sessionToken)
+
 	go func() {
-		stop, err := bridge.StartInProcess(cfg)
+		stop, err := bridge.StartInProcessWithCallback(cfg, func(id, tool, summary, targetURL string) {
+			if a.server != nil {
+				a.server.BroadcastApprovalRequested(id, tool, summary, targetURL)
+			}
+		})
 		if err != nil {
 			log.Printf("[bridge] aviso ao iniciar daemon in-process: %v", err)
 		}
@@ -198,8 +229,10 @@ func (a *App) startup(ctx context.Context) {
 	}()
 	addr := fmt.Sprintf("127.0.0.1:%d", a.port)
 	a.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: a.server.Handler(),
+		Addr:              addr,
+		Handler:           a.server.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -209,8 +242,8 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 
-	// Injetar variável no window do Webview com a porta real
-	injectJS := config.FormatInjectJS(a.port)
+	// Injetar variável no window do Webview com a porta real e token de sessão
+	injectJS := config.FormatInjectJSWithToken(a.port, sessionToken)
 	wailsRuntime.WindowExecJS(ctx, injectJS)
 }
 

@@ -66,8 +66,24 @@ func TestBrowserWizard_Endpoints_TDD(t *testing.T) {
 		}
 	}
 
-	// 2. POST /api/browser/install-policy com updateUrl customizada
+	// 2. Rejeição de UpdateURL não autorizada (P0.2)
+	unauthURL := "https://malicious-hacker.com/bb/update"
+	unauthBody, _ := json.Marshal(InstallPolicyRequest{
+		Browser:   targetBrowser,
+		UpdateURL: unauthURL,
+	})
+	respUnauth, err := http.Post(ts.URL+"/api/browser/install-policy", "application/json", bytes.NewReader(unauthBody))
+	if err != nil {
+		t.Fatalf("falha ao chamar install-policy: %v", err)
+	}
+	respUnauth.Body.Close()
+	if respUnauth.StatusCode != http.StatusBadRequest {
+		t.Fatalf("esperava 400 Bad Request para UpdateURL arbitrária, obteve %d", respUnauth.StatusCode)
+	}
+
+	// 3. POST /api/browser/install-policy com updateUrl autorizada pelo servidor
 	customURL := "https://meu-servidor.local/bb/update"
+	srv.SetBrowserBridgeUpdateBaseURL(customURL)
 	installBody, _ := json.Marshal(InstallPolicyRequest{
 		Browser:   targetBrowser,
 		UpdateURL: customURL,

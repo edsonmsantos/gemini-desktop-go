@@ -257,6 +257,15 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
 
   // Processar eventos de WebSocket
   const handleWSEvent = useCallback((event: WSEvent) => {
+    // 0. Evento de push para aprovação do navegador (Bridge)
+    if (event.type === 'browser_approval_requested') {
+      void fetchBrowserApprovals().then((list) => {
+        setBrowserApprovals(list)
+        setBrowserApprovalsPending(list.length)
+      })
+      return
+    }
+
     // 1. Atualizar Set de processamento para qualquer conversa
     const eventConvId = event.conversationId
     if (eventConvId) {

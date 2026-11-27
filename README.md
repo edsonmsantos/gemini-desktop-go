@@ -209,17 +209,28 @@ npm install
 npm run dev
 ```
 
-### 3. Executando em Modo Servidor Web Local (Fallback / Debug)
+### 3. Executando em Modo Servidor API Headless (`serve`)
 ```bash
 go run . serve
 ```
-Por padrão, a interface estará disponível em:
+O modo `serve` executa o backend como uma **API JSON headless** (sem interface web legada, eliminando superfícies de ataque como XSS armazenado).
+
+Por padrão, a API escuta em:
 **http://127.0.0.1:8399**
+
+> [!IMPORTANT]
+> **Autenticação Obrigatória:** Ao iniciar, o servidor gera automaticamente um token efêmero de sessão e o exibe no console (`X-Gemini-Token: <token>`).
+> Todas as chamadas para a API (GET, POST, DELETE e WebSocket `/api/stream?token=<token>`) exigem o envio do token no cabeçalho `X-Gemini-Token` ou `Authorization: Bearer <token>`.
 
 Você também pode especificar flags personalizadas:
 ```bash
 go run . serve --port 9000 --cwd /caminho/do/projeto
 ```
+
+### 4. Perfil de Ferramentas Browser Bridge (`BROWSER_BRIDGE_TOOL_PROFILE`)
+O MCP Server do `browser-bridge` suporta perfis de ferramentas via variável de ambiente:
+- `full` (padrão): Expõe todas as 31 ferramentas (14 v2 + 17 legadas), garantindo 100% de compatibilidade com as skills instaladas (`anac-rab`, `bnmp-cnj`, `detetive-forense`, `esaj-tjms`, `sigo-pcms`).
+- `compact`: Expõe exclusivamente as 14 ferramentas v2 modernas (`browser_act`, `snapshot`, `extract`, `eval`, etc.), reduzindo em ~45% a carga de tokens de contexto para fluxos modernos.
 
 ---
 

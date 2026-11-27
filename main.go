@@ -18,7 +18,7 @@ import (
 	"geminidesktop-go/internal/config"
 	"geminidesktop-go/internal/server"
 	"geminidesktop-go/internal/store"
-	"geminidesktop-go/web"
+	"path/filepath"
 )
 
 func init() {
@@ -94,13 +94,21 @@ func main() {
 	}
 	defer st.Close()
 
-	srv := server.NewServerV2(client, defaultCWD, web.Files, st)
+	srv := server.NewServerV2(client, defaultCWD, nil, st)
 	srv.SetTempWorkspacesDir(cfg.GetTempWorkspacesDir())
 	srv.SetNotificationsEnabled(cfg.NotificationsEnabled())
 	srv.SetTurnTimeout(cfg.TurnTimeout())
 	srv.SetAgentBinary(agentCmd)
 	srv.SetPort(port)
 	srv.SetBrowserBridge(cfg.GetBrowserBridgePort(), cfg.GetBrowserBridgeTokenPath())
+
+	// G1: Gera token efêmero de sessão também no modo serve (evita API aberta sem autenticação)
+	sessionToken := server.GenerateSessionToken()
+	srv.SetSessionToken(sessionToken)
+	if home, err := os.UserHomeDir(); err == nil {
+		srv.SetScreenshotsBaseDir(filepath.Join(home, ".geminidesktop", "screenshots"))
+		srv.SetUserSkillsDir(filepath.Join(home, ".agents", "skills"))
+	}
 	if cfg.BrowserBridgeUpdateBaseURL != "" {
 		srv.SetBrowserBridgeUpdateBaseURL(cfg.BrowserBridgeUpdateBaseURL)
 	}
@@ -111,8 +119,10 @@ func main() {
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	httpServer := &http.Server{
-		Addr:    addr,
-		Handler: srv.Handler(),
+		Addr:              addr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Graceful shutdown
@@ -120,7 +130,8 @@ func main() {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("[GeminiDesktop] Servidor rodando em http://%s", addr)
+		log.Printf("[GeminiDesktop] Servidor API headless ativo em http://%s", addr)
+		log.Printf("[GeminiDesktop] Autenticação obrigatória. X-Gemini-Token: %s", sessionToken)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[erro] Falha no servidor HTTP: %v", err)
 		}
