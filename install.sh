@@ -77,8 +77,12 @@ fi
 BIN_TARGET="$INSTALL_DIR/geminidesktop-go"
 DESKTOP_TARGET="$APPS_DIR/geminidesktop-go.desktop"
 
-# Diretório base deste script
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Diretório base deste script (pode ser vazio se executado via pipe/stdin)
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+else
+    SCRIPT_DIR=""
+fi
 
 # Processamento de argumentos
 DO_DOWNLOAD=0
@@ -174,33 +178,38 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ "$DO_DOWNLOAD" -eq 1 ]; then
+if [ "$DO_DOWNLOAD" -eq 1 ] || [ -z "$SCRIPT_DIR" ] || ( [ ! -f "$SCRIPT_DIR/build/bin/geminidesktop-go" ] && [ ! -f "$SCRIPT_DIR/geminidesktop-go" ] ); then
     info "Baixando última versão estável do GitHub ($REPO)..."
     TEMP_DIR="$(mktemp -d)"
+    DOWNLOADED_BIN=""
+
     if command -v gh >/dev/null 2>&1; then
-        gh release download --repo "$REPO" --pattern "geminidesktop-go" --dir "$TEMP_DIR"
-    else
-        LATEST_URL="https://github.com/$REPO/releases/latest/download/geminidesktop-go"
-        curl -sSL "$LATEST_URL" -o "$TEMP_DIR/geminidesktop-go"
+        if gh release download --repo "$REPO" --pattern "*linux*amd64*" --dir "$TEMP_DIR" 2>/dev/null; then
+            DOWNLOADED_BIN="$(find "$TEMP_DIR" -type f -name "*linux*amd64*" | head -n 1)"
+        elif gh release download --repo "$REPO" --pattern "geminidesktop-go*" --dir "$TEMP_DIR" 2>/dev/null; then
+            DOWNLOADED_BIN="$(find "$TEMP_DIR" -type f -name "geminidesktop-go*" | head -n 1)"
+        fi
     fi
-    BIN_SOURCE="$TEMP_DIR/geminidesktop-go"
-elif [ -f "$SCRIPT_DIR/build/bin/geminidesktop-go" ]; then
+
+    if [ -z "$DOWNLOADED_BIN" ] || [ ! -f "$DOWNLOADED_BIN" ]; then
+        LATEST_URL="https://github.com/$REPO/releases/latest/download/geminidesktop-go-linux-amd64"
+        info "Baixando via curl ($LATEST_URL)..."
+        if curl -fsSL "$LATEST_URL" -o "$TEMP_DIR/geminidesktop-go"; then
+            DOWNLOADED_BIN="$TEMP_DIR/geminidesktop-go"
+        else
+            FALLBACK_URL="https://github.com/$REPO/releases/latest/download/geminidesktop-go"
+            curl -fsSL "$FALLBACK_URL" -o "$TEMP_DIR/geminidesktop-go"
+            DOWNLOADED_BIN="$TEMP_DIR/geminidesktop-go"
+        fi
+    fi
+    BIN_SOURCE="$DOWNLOADED_BIN"
+elif [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/build/bin/geminidesktop-go" ]; then
     BIN_SOURCE="$SCRIPT_DIR/build/bin/geminidesktop-go"
-elif [ -f "$SCRIPT_DIR/geminidesktop-go" ]; then
+elif [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/geminidesktop-go" ]; then
     BIN_SOURCE="$SCRIPT_DIR/geminidesktop-go"
-else
-    info "Binário compilado local não encontrado. Baixando do GitHub ($REPO)..."
-    TEMP_DIR="$(mktemp -d)"
-    if command -v gh >/dev/null 2>&1; then
-        gh release download --repo "$REPO" --pattern "geminidesktop-go" --dir "$TEMP_DIR"
-    else
-        LATEST_URL="https://github.com/$REPO/releases/latest/download/geminidesktop-go"
-        curl -sSL "$LATEST_URL" -o "$TEMP_DIR/geminidesktop-go"
-    fi
-    BIN_SOURCE="$TEMP_DIR/geminidesktop-go"
 fi
 
-if [ ! -f "$BIN_SOURCE" ]; then
+if [ -z "$BIN_SOURCE" ] || [ ! -f "$BIN_SOURCE" ]; then
     error "Não foi possível encontrar nem baixar o binário geminidesktop-go."
     exit 1
 fi
@@ -223,7 +232,7 @@ success "Links simbólicos criados em $BIN_DIR/geminidesktop-go e gemini-desktop
 
 # 6. Instalação dos ícones do sistema
 info "Instalando ícones no tema do sistema..."
-if [ -d "$SCRIPT_DIR/build/linux/icons" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/build/linux/icons" ]; then
     for dir in "$SCRIPT_DIR/build/linux/icons"/*x*/; do
         if [ -d "$dir" ]; then
             size="$(basename "$dir")"
@@ -235,11 +244,28 @@ if [ -d "$SCRIPT_DIR/build/linux/icons" ]; then
     done
 fi
 
-# Copia appicon de alta resolução (512x512)
-if [ -f "$SCRIPT_DIR/build/appicon.png" ]; then
-    mkdir -p "$ICONS_BASE/512x512/apps"
-    cp "$SCRIPT_DIR/build/appicon.png" "$ICONS_BASE/512x512/apps/$APP_ID.png"
-    cp "$SCRIPT_DIR/build/appicon.png" "$INSTALL_DIR/appicon.png"
+# Copia appicon de alta resolução ou baixa do GitHub se necessário
+APPICON_SRC=""
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/build/appicon.png" ]; then
+    APPICON_SRC="$SCRIPT_DIR/build/appicon.png"
+else
+    if [ -z "$TEMP_DIR" ] || [ ! -d "$TEMP_DIR" ]; then
+        TEMP_DIR="$(mktemp -d)"
+    fi
+    ICON_TEMP="$TEMP_DIR/appicon.png"
+    if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/build/appicon.png" -o "$ICON_TEMP"; then
+        APPICON_SRC="$ICON_TEMP"
+    fi
+fi
+
+if [ -n "$APPICON_SRC" ] && [ -f "$APPICON_SRC" ]; then
+    for s in 512x512 256x256 128x128 64x64 48x48 32x32 16x16; do
+        mkdir -p "$ICONS_BASE/$s/apps"
+        if [ ! -f "$ICONS_BASE/$s/apps/$APP_ID.png" ]; then
+            cp "$APPICON_SRC" "$ICONS_BASE/$s/apps/$APP_ID.png"
+        fi
+    done
+    cp "$APPICON_SRC" "$INSTALL_DIR/appicon.png"
 fi
 
 # 7. Criação / Atualização do arquivo .desktop
