@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { CloseIcon, RefreshIcon, SpinnerIcon } from './icons'
+import { CloseIcon, GlobeIcon, RefreshIcon, SpinnerIcon } from './icons'
 import { MCPServer, SavedPrompt, Skill } from '../types'
 import { fetchMCPServers, fetchSkills, toggleMCPServer, fetchSavedPrompts, createSavedPrompt, updateSavedPrompt, deleteSavedPrompt } from '../api'
+import { BrowserSetupWizard } from './BrowserSetupWizard'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -10,7 +11,7 @@ interface SettingsModalProps {
   agentCmd: string
   theme: 'dark' | 'light'
   onToggleTheme: () => void
-  initialTab?: 'general' | 'mcp' | 'skills' | 'prompts'
+  initialTab?: 'general' | 'mcp' | 'skills' | 'prompts' | 'browser'
   cwd?: string
 }
 
@@ -24,7 +25,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   initialTab = 'general',
   cwd
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'mcp' | 'skills' | 'prompts'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'general' | 'mcp' | 'skills' | 'prompts' | 'browser'>(initialTab)
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -236,7 +237,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div
         style={{
-          width: activeTab === 'mcp' || activeTab === 'prompts' ? 580 : 480,
+          width: activeTab === 'mcp' || activeTab === 'prompts' || activeTab === 'browser' ? 620 : 480,
           maxWidth: '92vw',
           maxHeight: '85vh',
           backgroundColor: 'var(--bg-modal)',
@@ -387,6 +388,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {savedPrompts.length}
               </span>
             )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('browser')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 14,
+              fontSize: 13,
+              fontWeight: 500,
+              backgroundColor: activeTab === 'browser' ? 'var(--bg-pill-hover)' : 'transparent',
+              color: activeTab === 'browser' ? 'var(--text-primary)' : 'var(--text-muted)',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              transition: 'background 0.15s, color 0.15s'
+            }}
+          >
+            <GlobeIcon size={14} />
+            <span>Navegador</span>
           </button>
         </div>
 
@@ -1127,6 +1149,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, padding: '0 2px' }}>
               💡 Em uma conversa, digite <code style={{ fontFamily: 'var(--font-mono)' }}>@</code> no campo de mensagem para inserir um prompt salvo.
             </div>
+          </div>
+        )}
+
+        {/* Conteúdo da Aba Navegador (Browser Bridge) */}
+        {activeTab === 'browser' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '65vh', paddingRight: 4 }}>
+            <BrowserSetupWizard isEmbeddedInModal={true} />
           </div>
         )}
 

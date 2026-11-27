@@ -10,6 +10,7 @@ import {
 import {
   CheckIcon,
   CloseIcon,
+  CopyIcon,
   ExternalLinkIcon,
   GlobeIcon,
   RefreshIcon,
@@ -43,7 +44,23 @@ export const BrowserSetupWizard: React.FC<BrowserSetupWizardProps> = ({
   const [restartingBrowser, setRestartingBrowser] = useState<string | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0)
   const [showManualFallback, setShowManualFallback] = useState<boolean>(false)
+  const [showManualGuide, setShowManualGuide] = useState<boolean>(true)
+  const [copiedPath, setCopiedPath] = useState<boolean>(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+
+  const isWindows = typeof navigator !== 'undefined' && navigator.platform?.toLowerCase().includes('win')
+  const extensionPath = isWindows
+    ? '%USERPROFILE%\\.browser-bridge\\extension'
+    : '~/.browser-bridge/extension'
+
+  const handleCopyPath = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(extensionPath).then(() => {
+        setCopiedPath(true)
+        setTimeout(() => setCopiedPath(false), 2000)
+      })
+    }
+  }
 
   const pollIntervalRef = useRef<number | null>(null)
   const timerIntervalRef = useRef<number | null>(null)
@@ -572,6 +589,188 @@ export const BrowserSetupWizard: React.FC<BrowserSetupWizardProps> = ({
           })}
         </div>
       )}
+
+      {/* SEÇÃO PERMANENTE: INSTALAÇÃO MANUAL & SOLUÇÃO DE PROBLEMAS */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          padding: 16,
+          borderRadius: 12,
+          backgroundColor: 'var(--bg-card)',
+          border: '1px solid var(--border-card)'
+        }}
+      >
+        <div
+          onClick={() => setShowManualGuide((prev) => !prev)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <TerminalIcon size={18} color="var(--accent-blue)" />
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+              Instalação Manual & Resolução de Problemas
+            </span>
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {showManualGuide ? 'Ocultar ▲' : 'Ver instruções ▼'}
+          </span>
+        </div>
+
+        {showManualGuide && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Caso a instalação automática de políticas não seja suportada pelo seu navegador (especialmente no <strong>Brave</strong>) ou se você preferir carregar a extensão diretamente:
+            </div>
+
+            {/* Passo a Passo Load Unpacked */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: '12px 14px',
+                borderRadius: 8,
+                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid var(--border-subtle)'
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                Como carregar a extensão no Brave, Chrome ou Edge:
+              </span>
+              <ol style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                <li>
+                  Abra uma nova aba e acesse <code style={{ color: 'var(--accent-blue)', fontFamily: 'var(--font-mono)' }}>brave://extensions</code> ou <code style={{ color: 'var(--accent-blue)', fontFamily: 'var(--font-mono)' }}>chrome://extensions</code>.
+                </li>
+                <li>
+                  Ative o interruptor <strong>Modo do desenvolvedor</strong> (canto superior direito).
+                </li>
+                <li>
+                  Clique no botão <strong>Carregar sem compactação</strong> (Load unpacked).
+                </li>
+                <li>
+                  Selecione o diretório da extensão no seu computador:
+                </li>
+              </ol>
+
+              {/* Caixa com caminho e botão copiar */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  backgroundColor: 'var(--bg-pill)',
+                  border: '1px solid var(--border-subtle)',
+                  marginTop: 2
+                }}
+              >
+                <code style={{ fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+                  {extensionPath}
+                </code>
+                <button
+                  type="button"
+                  onClick={handleCopyPath}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 4,
+                    backgroundColor: copiedPath ? 'rgba(52, 168, 83, 0.2)' : 'var(--bg-card)',
+                    border: '1px solid var(--border-card)',
+                    color: copiedPath ? 'var(--status-completed)' : 'var(--text-primary)',
+                    fontSize: 11,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    flexShrink: 0
+                  }}
+                >
+                  <CopyIcon size={12} />
+                  <span>{copiedPath ? 'Copiado!' : 'Copiar caminho'}</span>
+                </button>
+              </div>
+
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                💡 <strong>Dica Brave:</strong> No Brave Browser, o navegador bloqueia políticas empresariais off-store. A instalação via "Carregar sem compactação" acima é o caminho oficial e recomendado.
+              </div>
+            </div>
+
+            {/* Alternativa via Terminal */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                Instalação Automática via Terminal:
+              </span>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  backgroundColor: 'var(--bg-pill)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  color: 'var(--text-primary)'
+                }}
+              >
+                <span>browser-bridge install browsers</span>
+              </div>
+            </div>
+
+            {/* Diagnóstico Rápido */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderRadius: 8,
+                backgroundColor: 'rgba(66, 133, 244, 0.05)',
+                border: '1px solid rgba(66, 133, 244, 0.2)',
+                fontSize: 12
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Ponte Local (Relay Daemon)
+                </span>
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  Porta Padrão: <strong>9223</strong> • Protocolo WebSocket com Origin-Pinning
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCheckNow}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  backgroundColor: 'var(--accent-blue)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                <RefreshIcon size={12} />
+                <span>Testar Conexão</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Ações inferiores quando usado de forma autônoma (não modal) */}
       {!isEmbeddedInModal && (

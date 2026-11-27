@@ -9,13 +9,15 @@ interface AgentFooterProps {
   theme: 'dark' | 'light'
   onToggleTheme: () => void
   onOpenSettings: () => void
+  onOpenBrowserSettings?: () => void
 }
 
 export const AgentFooter: React.FC<AgentFooterProps> = ({
   agentInfo,
   theme,
   onToggleTheme,
-  onOpenSettings
+  onOpenSettings,
+  onOpenBrowserSettings
 }) => {
   const email = agentInfo?.email
 
@@ -110,7 +112,7 @@ export const AgentFooter: React.FC<AgentFooterProps> = ({
 
       {/* Botões de Ação do Rodapé: Pill Navegador + Tema + Configurações */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: email ? 0 : 'auto', flexShrink: 0 }}>
-        <BrowserStatusPill />
+        <BrowserStatusPill onClick={onOpenBrowserSettings} />
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <button
           onClick={onOpenSettings}

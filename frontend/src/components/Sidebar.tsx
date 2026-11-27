@@ -19,7 +19,8 @@ interface SidebarProps {
   onDeleteConversation: (id: string) => void
   onRenameConversation: (id: string, newTitle: string) => Promise<void>
   onSelectCwd: (cwd: string) => void
-  onOpenSettings: () => void
+  onOpenSettings: (tab?: 'general' | 'mcp' | 'skills' | 'prompts' | 'browser') => void
+  onOpenBrowserSettings?: () => void
   onMoveConversation?: (id: string, folder: string) => void
 }
 
@@ -38,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRenameConversation,
   onSelectCwd,
   onOpenSettings,
+  onOpenBrowserSettings,
   onMoveConversation
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false)
@@ -1174,7 +1176,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         agentInfo={agentInfo}
         theme={theme}
         onToggleTheme={onToggleTheme}
-        onOpenSettings={onOpenSettings}
+        onOpenSettings={() => onOpenSettings('general')}
+        onOpenBrowserSettings={onOpenBrowserSettings || (() => onOpenSettings('browser'))}
       />
     </aside>
   )

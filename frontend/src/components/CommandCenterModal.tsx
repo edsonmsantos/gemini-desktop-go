@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { SearchIcon, CloseIcon, SpinnerIcon, PlusIcon, SettingsIcon, SunIcon, MoonIcon, ToolIcon, ZapIcon } from './icons'
+import { SearchIcon, CloseIcon, SpinnerIcon, PlusIcon, SettingsIcon, SunIcon, MoonIcon, ToolIcon, ZapIcon, GlobeIcon } from './icons'
 import { SearchResult } from '../types'
 import { searchConversations } from '../api'
 
@@ -8,7 +8,7 @@ interface CommandCenterModalProps {
   onClose: () => void
   onNewConversation: () => void
   onToggleTheme: () => void
-  onOpenSettings: (tab?: 'general' | 'mcp') => void
+  onOpenSettings: (tab?: 'general' | 'mcp' | 'skills' | 'prompts' | 'browser') => void
   onSelectConversation: (id: string) => void
   theme: 'dark' | 'light'
 }
@@ -131,6 +131,17 @@ export const CommandCenterModal: React.FC<CommandCenterModalProps> = ({
       icon: <ZapIcon size={16} color="var(--accent-blue)" />,
       onExecute: () => {
         onClose()
+      }
+    },
+    {
+      id: 'cmd-browser',
+      type: 'command',
+      title: 'Integração do Navegador (Browser Bridge)',
+      subtitle: 'Instalação da extensão, diagnóstico e estado da ponte de automação',
+      icon: <GlobeIcon size={16} color="var(--accent-blue)" />,
+      onExecute: () => {
+        onClose()
+        onOpenSettings('browser')
       }
     }
   ]

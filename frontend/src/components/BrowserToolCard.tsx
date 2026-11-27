@@ -171,6 +171,17 @@ export const BrowserToolCard: React.FC<BrowserToolCardProps> = ({ toolCall }) =>
   const hasArgs = Object.keys(toolArgs).length > 0
   const hasOutput = Boolean(rawOutput && toolCall.status === 'completed')
 
+  const isBrowserDisconnectError = isFailed && (
+    !rawOutput ||
+    rawOutput.toLowerCase().includes('not connected') ||
+    rawOutput.toLowerCase().includes('disconnected') ||
+    rawOutput.toLowerCase().includes('daemon') ||
+    rawOutput.toLowerCase().includes('connection refused') ||
+    rawOutput.toLowerCase().includes('ponte') ||
+    rawOutput.toLowerCase().includes('extensão') ||
+    rawOutput.toLowerCase().includes('relay')
+  )
+
   return (
     <div
       style={{
@@ -353,6 +364,56 @@ export const BrowserToolCard: React.FC<BrowserToolCardProps> = ({ toolCall }) =>
               >
                 {JSON.stringify(toolArgs, null, 2)}
               </pre>
+            </div>
+          )}
+
+          {isBrowserDisconnectError && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '10px 14px',
+                borderRadius: 8,
+                backgroundColor: 'rgba(234, 67, 53, 0.08)',
+                border: '1px solid rgba(234, 67, 53, 0.3)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>⚠️</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    Extensão do Navegador Desconectada
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                    A automação web requer que a extensão Browser Bridge esteja ativa no seu navegador.
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  window.dispatchEvent(new CustomEvent('open-browser-settings'))
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '5px 12px',
+                  borderRadius: 6,
+                  backgroundColor: 'var(--accent-blue)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <span>Instruções de Instalação</span>
+              </button>
             </div>
           )}
 

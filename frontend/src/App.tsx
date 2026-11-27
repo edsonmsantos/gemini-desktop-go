@@ -81,7 +81,7 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
 
   // Modais de UI
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
-  const [settingsTab, setSettingsTab] = useState<'general' | 'mcp'>('general')
+  const [settingsTab, setSettingsTab] = useState<'general' | 'mcp' | 'skills' | 'prompts' | 'browser'>('general')
   const [isNewConvModalOpen, setIsNewConvModalOpen] = useState<boolean>(false)
   const [isCommandCenterOpen, setIsCommandCenterOpen] = useState<boolean>(false)
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false)
@@ -740,10 +740,20 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
     }
   }
 
-  const handleOpenSettings = (tab?: 'general' | 'mcp') => {
+  const handleOpenSettings = (tab?: 'general' | 'mcp' | 'skills' | 'prompts' | 'browser') => {
     setSettingsTab(tab || 'general')
     setIsSettingsOpen(true)
   }
+
+  useEffect(() => {
+    const onOpenBrowser = () => {
+      handleOpenSettings('browser')
+    }
+    window.addEventListener('open-browser-settings', onOpenBrowser)
+    return () => {
+      window.removeEventListener('open-browser-settings', onOpenBrowser)
+    }
+  }, [])
 
   const isWelcome = !activeConversationId && messages.length === 0
   const activeConversation = conversations.find((c) => c.id === activeConversationId)
@@ -775,7 +785,8 @@ const [activeConversationId, setActiveConversationId] = useState<string | null>(
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
         onSelectCwd={(cwd) => setSelectedCwd(cwd)}
-        onOpenSettings={() => handleOpenSettings('general')}
+        onOpenSettings={(tab) => handleOpenSettings(tab || 'general')}
+        onOpenBrowserSettings={() => handleOpenSettings('browser')}
       />
 
       {/* Área Central: Welcome State ou Chat View */}
