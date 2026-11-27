@@ -26,7 +26,7 @@ O script `install.sh` gerencia tanto a **primeira instalação** quanto as **atu
 
 #### 1. Instalação Rápida (via terminal)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/edsonmsantos/gemini-desktop-go/main/install.sh | bash -s -- --download
+curl -fsSL https://github.com/edsonmsantos/gemini-desktop-go/releases/latest/download/install.sh | bash -s -- --download
 ```
 
 #### 2. Instalação a partir do Repositório ou Clone Local
@@ -83,7 +83,7 @@ Verifique e assegure os pré-requisitos antes da execução:
 O script de instalação é 100% não-interativo e seguro para automações de agentes:
 ```bash
 # Download e instalação direta da última release estável:
-curl -fsSL https://raw.githubusercontent.com/edsonmsantos/gemini-desktop-go/main/install.sh | bash -s -- --download
+curl -fsSL https://github.com/edsonmsantos/gemini-desktop-go/releases/latest/download/install.sh | bash -s -- --download
 ```
 Certifique-se de que `~/.local/bin` está no `PATH` da sessão do agente.
 
